@@ -1,0 +1,21 @@
+# Virtual Environment
+venv_*/
+
+# Folder
+dataset/
+result/
+debug/
+checkpoints/
+
+# Files
+*.pth
+*.jpg
+*.jpeg
+*.png
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
