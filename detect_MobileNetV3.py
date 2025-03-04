@@ -491,44 +491,69 @@ def visualize_dataset_samples(dataset_dir, model=None, device=None, num_samples=
     
     # 원본 이미지와 마킹된 이미지 분리
     original_files = [f for f in all_files if '_marked' not in f]
-    marked_files = [f for f in all_files if '_marked' in f]
     
     # 파일 수 제한
     if num_samples > 0:
         original_files = original_files[:num_samples]
+
+    # 클래스별 색상 정의 (RGB 형식)
+    colors = CLASS_COLORS
     
     # 각 원본 이미지에 대해 처리
     for i, orig_file in enumerate(original_files):
-        base_name = os.path.splitext(orig_file)[0]
-        
-        # 대응되는 마킹된 이미지 찾기
-        marked_file = next((f for f in marked_files if base_name in f), None)
-        if not marked_file:
-            print(f"'{orig_file}'에 대응하는 마킹된 이미지를 찾을 수 없습니다.")
-            continue
+        img_name = os.path.splitext(orig_file)[0]
+        label_path = os.path.join(dataset_dir, f"{img_name}.txt")
         
         # 이미지 경로
-        orig_path = os.path.join(dataset_dir, orig_file)
-        marked_path = os.path.join(dataset_dir, marked_file)
-        
+        orig_path = os.path.join(dataset_dir, orig_file)        
         # 이미지 로드
         orig_img = Image.open(orig_path).convert("RGB")
-        marked_img = Image.open(marked_path).convert("RGB")
-        
+
+        labels = []
+        if os.path.exists(label_path):
+            with open(label_path, 'r') as f:
+                for line in f:
+                    values = line.strip().split()
+                    if len(values) == 5:
+                        # YOLO 형식: class_id x_center y_center width height
+                        class_id = int(values[0])
+                        x_center = float(values[1])
+                        y_center = float(values[2])
+                        width = float(values[3])
+                        height = float(values[4])
+                        labels.append([class_id, x_center, y_center, width, height])
+
+        # 라벨이 없는 경우 빈 리스트
+        labels_tensor = torch.tensor(labels, dtype=torch.float32) if labels else torch.zeros((0, 5), dtype=torch.float32)
+
         # matplotlib 그림 설정
-        # fig, ax = plt.subplots(1, 2 if model is None else 3, figsize=(15, 5))
         fig, ax = plt.subplots(2 if model is None else 3, 1)#, figsize=(15, 5))
-        
+
         # 원본 이미지 표시
         ax[0].imshow(orig_img)
         ax[0].set_title(f"원본: {orig_file}")
         ax[0].axis('off')
-        
-        # 마킹된 이미지 표시
-        ax[1].imshow(marked_img)
-        ax[1].set_title(f"Ground Truth: {marked_file}")
+
+        # 라벨이 적용된 이미지 표시
+        ax[1].imshow(orig_img)
+        ax[1].set_title(f"Ground Truth: {orig_file}")
         ax[1].axis('off')
-        
+
+        # 라벨 시각화
+        # 클래스 ID에 따라 라벨을 정렬 (ID가 1인 박스를 가장 마지막에 )
+        sorted_labels = sorted(labels_tensor, key=lambda x: (x[0] == 1, x[0]))
+        for label in sorted_labels:
+            class_id, x_center, y_center, width, height = label
+            # YOLO 좌표를 이미지 좌표로 변환
+            x1 = (x_center - width / 2) * orig_img.width
+            y1 = (y_center - height / 2) * orig_img.height
+            x2 = (x_center + width / 2) * orig_img.width
+            y2 = (y_center + height / 2) * orig_img.height
+            
+            # 바운딩 박스 그리기 (클래스별 색상 사용, 0-1 범위로 변환)
+            color = tuple(c / 255.0 for c in colors[int(class_id)])  # 0-255를 0-1로 변환
+            ax[1].add_patch(plt.Rectangle((x1, y1), x2 - x1, y2 - y1, edgecolor=color, facecolor='none', linewidth=2))
+           
         # 모델이 제공된 경우 예측 수행
         if model is not None:
             # 이미지 전처리
@@ -561,10 +586,9 @@ def visualize_dataset_samples(dataset_dir, model=None, device=None, num_samples=
         
         # 그림 저장
         plt.tight_layout()
-        plt.savefig(os.path.join(debug_dir, f"debug_{i+1}_{base_name}.png"))
-        plt.close()
-        
-        print(f"디버그 이미지 저장됨: debug_{i+1}_{base_name}.png")
+        plt.savefig(os.path.join(debug_dir, f"debug_{i+1}_{img_name}.png"))
+        plt.close()        
+        print(f"디버그 이미지 저장됨: debug_{i+1}_{img_name}.png")
     
     print(f"총 {len(original_files)}개의 디버그 이미지가 {debug_dir} 디렉토리에 저장되었습니다.")
 
@@ -652,7 +676,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="RF 스펙트럼 신호 탐지")
-    parser.add_argument("--weights", default="checkpoints/spectrum_model_final.pth", help="모델 가중치 파일 경로")
+    parser.add_argument("--weights", default="checkpoints/best_spectrum_model.pth", help="모델 가중치 파일 경로")
     parser.add_argument("--img-dir", default='./dataset', help="이미지 디렉토리 경로")
     parser.add_argument("--output-dir", default="results", help="결과 저장 디렉토리")
     parser.add_argument("--batch-size", type=int, default=1, help="배치 크기")
