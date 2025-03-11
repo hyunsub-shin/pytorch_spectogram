@@ -43,8 +43,8 @@ def main():
 if __name__ == "__main__":
     img_size = (206, 889) # (h, w)
     batch = 2
-    epochs = 20
+    epochs = 100
     weights = 'yolov5su.pt'
-    data_yaml = 'yolov5/drone_dataset.yaml'
+    data_yaml = 'drone_dataset.yaml'
 
     main()

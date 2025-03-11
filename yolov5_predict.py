@@ -5,7 +5,7 @@ from ultralytics import YOLO
 import os
 import numpy as np
 
-CLASS_NAMES: ['WiFi', 'collision', 'BT']
+CLASS_NAMES = ["drone"]
 
 def predict(image_path, save_dir, weights, confidence_threshold=0.5):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -80,9 +80,9 @@ def predict(image_path, save_dir, weights, confidence_threshold=0.5):
 
 
 if __name__ == "__main__":
-    image_path = 'spectrogram_training_data_20221006/result_frame_138847877310877880_bw_25E+6.png'  # 예측할 이미지 경로
+    image_path = 'datasets/20250305_162538.png'  # 예측할 이미지 경로
     # image_path = 'drone_data/result_frame_138848079307226420_bw_125E+6.png'  # 예측할 이미지 경로
-    save_directory = 'spectrogram_training_data_20221006'  # 결과를 저장할 사용자 지정 폴더
+    save_directory = 'datasets'  # 결과를 저장할 사용자 지정 폴더
     # weights='last.pt'
     weights='best.pt'
     confidence_threshold = 0.5  # 신뢰도 임계값 설정

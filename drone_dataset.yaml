@@ -1,6 +1,5 @@
-train: D:\Temp\python\pyqt5_study\pytorch_spectogram\spectrogram_training_data_20221006\images\train
-val: D:\Temp\python\pyqt5_study\pytorch_spectogram\spectrogram_training_data_20221006\images\val
+train: D:\Temp\python\pyqt5_study\pytorcy_yolov5\datasets\images\train
+val: D:\Temp\python\pyqt5_study\pytorcy_yolov5\datasets\images\val
 
-
-nc: 3
-names: ['WiFi', 'collision', 'BT']
+nc: 1
+names: ['drone']
