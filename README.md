@@ -55,19 +55,19 @@ zipp==3.21.0
 
 ```
 pytorch_spectrogram/
-  ├── datasets/             		# 데이터셋 디렉토리
-  │     ├── images/          		# 이미지 디렉토리
-  │   	 │	    ├── train/          		# 학습 데이터
-  │     │		└── val/         		# 검증 데이터
-  │     └── labels/            		# 라벨 디렉토리
-  │   	 	    ├── train/          		# 학습 라벨
-  │     		└── val/         		# 검증 라벨  
-  ├── drone_dataset.yaml			# yaml 파일
-  ├── prepare_data.py           	# 데이터셋 준비
-  ├── yolov5_predict.py          # 예측 스크립트
-  ├── yolov5_train.py          	# 학습 스크립트
-  ├── requirements.txt     		# 필요한 패키지 목록
-  └── README.md            		# 프로젝트 설명
+  ├── datasets/				# 데이터셋 디렉토리
+  │     ├── images/				# 이미지 디렉토리
+  │     │     ├── train/			# 학습 데이터
+  │     │     └── val/				# 검증 데이터
+  │     └── labels/				# 라벨 디렉토리
+  │            ├── train/			# 학습 라벨
+  │            └── val/				# 검증 라벨  
+  ├── drone_dataset.yaml		# yaml 파일
+  ├── prepare_data.py		# 데이터셋 준비
+  ├── yolov5_predict.py		# 예측 스크립트
+  ├── yolov5_train.py		# 학습 스크립트
+  ├── requirements.txt		# 필요한 패키지 목록
+  └── README.md				# 프로젝트 설명
 ```
 
 ## 데이터 형식
