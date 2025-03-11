@@ -4,52 +4,15 @@
 
 ## Prepare_data
 
-- python prepare_data.py synthetic --drone (drone signal image) --back (background image) --output (output dir) --num (생성개수)
+```bash
+python prepare_data.py synthetic --drone (drone signal image) --back (background image) --output (output dir) --num (생성개수)
+```
 
 ## 요구사항
 
-certifi==2025.1.31
-charset-normalizer==3.4.1
-colorama==0.4.6
-contourpy==1.3.0
-cycler==0.12.1
-filelock==3.13.1
-fonttools==4.56.0
-fsspec==2024.6.1
-idna==3.10
-importlib_resources==6.5.2
-Jinja2==3.1.4
-kiwisolver==1.4.7
-MarkupSafe==2.1.5
-matplotlib==3.9.4
-mpmath==1.3.0
-networkx==3.2.1
-numpy==1.26.3
-opencv-python==4.11.0.86
-packaging==24.2
-pandas==2.2.3
-pillow==11.0.0
-psutil==7.0.0
-py-cpuinfo==9.0.0
-pyparsing==3.2.1
-python-dateutil==2.9.0.post0
-pytz==2025.1
-PyYAML==6.0.2
-requests==2.32.3
-scipy==1.13.1
-seaborn==0.13.2
-six==1.17.0
-sympy==1.13.1
-torch==2.5.1+cu121
-torchaudio==2.5.1+cu121
-torchvision==0.20.1+cu121
-tqdm==4.67.1
-typing_extensions==4.12.2
-tzdata==2025.1
-ultralytics==8.3.86
-ultralytics-thop==2.0.14
-urllib3==2.3.0
-zipp==3.21.0
+```bash
+requirements.txt
+```
 
 ## 프로젝트 구조
 
