@@ -2,44 +2,77 @@
 
 이 프로젝트는 PyTorch를 사용하여 스펙트럼 이미지에서 다양한 패턴과 객체를 감지하는 머신러닝 모델을 구현합니다. 해당 모델은 YOLO v4 형식의 라벨링 데이터를 사용하여 학습합니다.
 
-## 특징
+## Prepare_data
 
-- YOLO v4 형식의 라벨링 데이터 지원
-- 이미지 내 여러 객체 감지 가능
-- 맞춤형 객체 감지 모델 아키텍처
-- 실시간 추론 및 결과 시각화
-- 학습 진행 상황 추적 및 시각화
+- python prepare_data.py synthetic --drone (drone signal image) --back (background image) --output (output dir) --num (생성개수)
 
 ## 요구사항
 
-- Python 3.9.12
-- PyTorch 2.5.1-cu121
-- cuda 12.1
-- torchvision
-- matplotlib
-- numpy
-- pillow
-- tqdm
+certifi==2025.1.31
+charset-normalizer==3.4.1
+colorama==0.4.6
+contourpy==1.3.0
+cycler==0.12.1
+filelock==3.13.1
+fonttools==4.56.0
+fsspec==2024.6.1
+idna==3.10
+importlib_resources==6.5.2
+Jinja2==3.1.4
+kiwisolver==1.4.7
+MarkupSafe==2.1.5
+matplotlib==3.9.4
+mpmath==1.3.0
+networkx==3.2.1
+numpy==1.26.3
+opencv-python==4.11.0.86
+packaging==24.2
+pandas==2.2.3
+pillow==11.0.0
+psutil==7.0.0
+py-cpuinfo==9.0.0
+pyparsing==3.2.1
+python-dateutil==2.9.0.post0
+pytz==2025.1
+PyYAML==6.0.2
+requests==2.32.3
+scipy==1.13.1
+seaborn==0.13.2
+six==1.17.0
+sympy==1.13.1
+torch==2.5.1+cu121
+torchaudio==2.5.1+cu121
+torchvision==0.20.1+cu121
+tqdm==4.67.1
+typing_extensions==4.12.2
+tzdata==2025.1
+ultralytics==8.3.86
+ultralytics-thop==2.0.14
+urllib3==2.3.0
+zipp==3.21.0
 
 ## 프로젝트 구조
 
 ```
 pytorch_spectrogram/
-  ├── models/               			# 모델 정의
-  │     └── model_MobileNetV3.py 	# 객체 감지 모델
-  ├── dataset/             			# 데이터셋 디렉토리
-  │     ├── train/          		# 학습 데이터
-  │     └── test/            		# 테스트 데이터
-  ├── dataset.py           			# 데이터셋 클래스
-  ├── train_MobileNetV3.py           # 학습 스크립트
-  ├── detect_MobileNetV3.py          # 추론 및 시각화 스크립트
-  ├── requirements.txt     			# 필요한 패키지 목록
-  └── README.md            			# 프로젝트 설명
+  ├── datasets/             		# 데이터셋 디렉토리
+  │     ├── images/          		# 이미지 디렉토리
+  │   	 │	    ├── train/          		# 학습 데이터
+  │     │		└── val/         		# 검증 데이터
+  │     └── labels/            		# 라벨 디렉토리
+  │   	 	    ├── train/          		# 학습 라벨
+  │     		└── val/         		# 검증 라벨  
+  ├── drone_dataset.yaml			# yaml 파일
+  ├── prepare_data.py           	# 데이터셋 준비
+  ├── yolov5_predict.py          # 예측 스크립트
+  ├── yolov5_train.py          	# 학습 스크립트
+  ├── requirements.txt     		# 필요한 패키지 목록
+  └── README.md            		# 프로젝트 설명
 ```
 
 ## 데이터 형식
 
-이 프로젝트는 YOLO v4 형식의 라벨링 데이터를 사용합니다:
+이 프로젝트는 YOLO v5 형식의 라벨링 데이터를 사용합니다:
 
 - 이미지 파일: PNG/JPG 형식 (예: `image.png`)
 - 라벨 파일: 각 이미지에 대한 텍스트 파일 (예: `image.txt`)
@@ -66,36 +99,20 @@ class_id center_x center_y width height
 ### 모델 학습
 
 ```bash
-python train_MobileNetV3.py
+python yolov5_train.py
 ```
 
-학습 과정에서 검사점(checkpoint)과 손실 곡선이 각각 `checkpoints/`와 `results/` 디렉토리에 저장됩니다.
+학습 과정에서 검사점(checkpoint)과 손실 곡선이 각각 `runs/detect` 디렉토리에 저장됩니다.
 
 ### 추론 및 시각화
 
 ```bash
-python detect.py --input [이미지 경로 또는 디렉토리] --weights [모델 가중치 경로]
-```
-
-예:
-```bash
-python detect.py --input dataset/test/sample.png --weights checkpoints/spectrum_model_final.pth
+python yolov5_predict.py
 ```
 
 추가 옵션:
 ```
---conf-thres: 객체 신뢰도 임계값 (기본값: 0.25)
---nms-thres: NMS 임계값 (기본값: 0.45)
---output-dir: 결과 저장 디렉토리 (기본값: results/)
+--confidence_threshold: 객체 신뢰도 임계값 (기본값: 0.25)
+
 ```
 
-## 모델 아키텍처
-1. **백본 네트워크**: 기본적인 특징 추출을 위한 컨볼루션 레이어
-2. **피처 피라미드**: 여러 크기의 객체를 감지하기 위한, 서로 다른 스케일의 피처맵
-3. **앵커 박스**: 다양한 형태의 객체를 감지하기 위한 사전 정의된 박스
-4. **헤드**: 클래스 분류, 객체 신뢰도, 바운딩 박스 조정을 위한 레이어
-
-
-## 참고 자료
-- [논문](https://www.mdpi.com/2306-5729/7/12/168)
-- [dataset](https://fordatis.fraunhofer.de/handle/fordatis/287)
