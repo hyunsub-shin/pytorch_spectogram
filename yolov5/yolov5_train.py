@@ -41,7 +41,7 @@ def main():
 
 
 if __name__ == "__main__":
-    img_size = (206, 889)
+    img_size = (206, 889) # (h, w)
     batch = 2
     epochs = 100
     weights = 'yolov5su.pt'
