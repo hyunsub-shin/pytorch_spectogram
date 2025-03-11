@@ -1,6 +1,0 @@
-train: D:\Temp\python\pyqt5_study\pytorcy_yolov5\datasets\images\train
-val: D:\Temp\python\pyqt5_study\pytorcy_yolov5\datasets\images\val
-
-
-nc: 1
-names: ['drone']

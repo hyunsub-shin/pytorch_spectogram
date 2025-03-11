@@ -1,0 +1,6 @@
+train: D:\Temp\python\pyqt5_study\pytorch_spectogram\spectrogram_training_data_20221006\images\train
+val: D:\Temp\python\pyqt5_study\pytorch_spectogram\spectrogram_training_data_20221006\images\val
+
+
+nc: 3
+names: ['WiFi', 'collision', 'BT']
