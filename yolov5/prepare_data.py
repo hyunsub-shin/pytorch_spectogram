@@ -7,6 +7,26 @@ import numpy as np
 from PIL import Image, ImageDraw
 from tqdm import tqdm
 
+def delete_files_with_suffix(directory, suffix):
+    """
+    특정 접미사를 포함하는 파일 삭제
+    
+    Args:
+        directory: 대상 디렉토리 경로
+        suffix: 삭제할 파일의 접미사
+    """
+    # 디렉토리 내의 모든 파일을 순회
+    for filename in tqdm(os.listdir(directory)):
+        # 파일명이 접미사로 끝나는지 확인
+        if filename.endswith(suffix):
+            file_path = os.path.join(directory, filename)
+            try:
+                # 파일 삭제
+                os.remove(file_path)
+                print(f"Deleted: {file_path}")
+            except Exception as e:
+                print(f"Error deleting {file_path}: {e}")
+
 def create_directory_structure(base_dir):
     """
     학습/검증/테스트를 위한 디렉토리 구조 생성
@@ -546,6 +566,11 @@ def main():
     synthetic_parser.add_argument('--output', type=str, required=True, help='출력 디렉토리')
     synthetic_parser.add_argument('--num', type=int, default=5, help='이미지 생성 개수')
     
+    # 파일 삭제
+    delete_parser = subparsers.add_parser('delete', help='특정 접미사를 포함하는 파일 삭제')
+    delete_parser.add_argument('--dir', type=str, required=True, help='대상 디렉토리 경로')
+    delete_parser.add_argument('--suffix', type=str, required=True, help='삭제할 파일의 접미사')
+    
     args = parser.parse_args()
     
     if args.command == 'create':
@@ -561,6 +586,8 @@ def main():
         preview_dataset(args.dir, args.num, args.seed)
     elif args.command == 'synthetic':
         create_synthetic_drone_images(args.drone, args.back, args.output, args.num)
+    elif args.command == 'delete':
+        delete_files_with_suffix(args.dir, args.suffix)
     else:
         parser.print_help()
 
