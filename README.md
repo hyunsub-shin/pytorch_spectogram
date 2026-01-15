@@ -5,7 +5,7 @@
 ## Prepare_data
 
 ```bash
-python prepare_data.py synthetic --drone (drone signal image) --back (background image) --output (output dir) --num (생성개수)
+python prepare_data.py synthetic --drone (drone signal image) --back (background image dir) --output (output dir) --num (생성개수)
 ```
 
 ## 데이터셋 분할
