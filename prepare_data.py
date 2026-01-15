@@ -31,6 +31,13 @@ def create_directory_structure(base_dir):
     """
     학습/검증/테스트를 위한 디렉토리 구조 생성
     
+    기본 구조:
+        base_dir/train
+        base_dir/val
+        base_dir/test
+    
+    (YOLO 전용 구조는 `split_dataset`에서 별도로 생성)
+    
     Args:
         base_dir: 기본 디렉토리 경로
     """
@@ -42,20 +49,27 @@ def create_directory_structure(base_dir):
 
 def split_dataset(images_dir, labels_dir, masks_dir, output_dir, train_ratio=0.7, val_ratio=0.2, test_ratio=0.1, random_seed=42):
     """
-    데이터셋을 학습/검증/테스트로 분할
+    데이터셋을 학습/검증/테스트로 분할 (YOLO 데이터셋 구조로 저장)
     
     Args:
         images_dir: 이미지 디렉토리 경로
         labels_dir: 라벨 디렉토리 경로 (YOLO 형식 txt 파일)
         masks_dir: 마스크 디렉토리 경로 (선택적)
-        output_dir: 출력 디렉토리 경로
+        output_dir: 출력 디렉토리 경로 (예: ./datasets)
+            - images/train, images/val, images/test
+            - labels/train, labels/val, labels/test
+            - (선택) masks/train, masks/val, masks/test
         train_ratio: 학습 데이터 비율
         val_ratio: 검증 데이터 비율
         test_ratio: 테스트 데이터 비율
         random_seed: 랜덤 시드
     """
-    # 디렉토리 구조 생성
-    create_directory_structure(output_dir)
+    # YOLO 형식 디렉토리 구조 생성
+    for split in ['train', 'val', 'test']:
+        os.makedirs(os.path.join(output_dir, 'images', split), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, 'labels', split), exist_ok=True)
+        if masks_dir:
+            os.makedirs(os.path.join(output_dir, 'masks', split), exist_ok=True)
     
     # 이미지 파일 목록 가져오기
     image_extensions = ['.jpg', '.jpeg', '.png', '.bmp']
@@ -77,26 +91,26 @@ def split_dataset(images_dir, labels_dir, masks_dir, output_dir, train_ratio=0.7
         'test': image_files[val_end:]
     }
     
-    # 각 분할에 대해 파일 복사
+    # 각 분할에 대해 파일 복사 (YOLO 구조: images/…, labels/…, masks/…)
     for split, files in splits.items():
         print(f"{split} 데이터 복사 중: {len(files)} 파일")
         for file in tqdm(files):
             # 이미지 파일 복사
             src_image = os.path.join(images_dir, file)
-            dst_image = os.path.join(output_dir, split, file)
+            dst_image = os.path.join(output_dir, 'images', split, file)
             shutil.copy2(src_image, dst_image)
             
             # 라벨 파일 복사 (있는 경우)
             base_name = os.path.splitext(file)[0]
             src_label = os.path.join(labels_dir, f"{base_name}.txt")
-            dst_label = os.path.join(output_dir, split, f"{base_name}.txt")
+            dst_label = os.path.join(output_dir, 'labels', split, f"{base_name}.txt")
             if os.path.exists(src_label):
                 shutil.copy2(src_label, dst_label)
             
             # 마스크 파일 복사 (있는 경우)
             if masks_dir:
                 src_mask = os.path.join(masks_dir, f"{base_name}_mask.png")
-                dst_mask = os.path.join(output_dir, split, f"{base_name}_mask.png")
+                dst_mask = os.path.join(output_dir, 'masks', split, f"{base_name}_mask.png")
                 if os.path.exists(src_mask):
                     shutil.copy2(src_mask, dst_mask)
     
