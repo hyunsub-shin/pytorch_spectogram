@@ -8,6 +8,12 @@
 python prepare_data.py synthetic --drone (drone signal image) --back (background image) --output (output dir) --num (생성개수)
 ```
 
+## 데이터셋 분할
+
+```bash
+python prepare_data.py split --images (image dir) --labels (label dir) --output (output dir) --train 0.7 --val 0.2 --test 0.1
+  ```
+
 ## 요구사항
 
 ```bash
