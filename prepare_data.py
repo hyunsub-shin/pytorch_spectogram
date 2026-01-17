@@ -4,6 +4,7 @@ import random
 import argparse
 import cv2
 import numpy as np
+import re
 from PIL import Image, ImageDraw
 from tqdm import tqdm
 
@@ -405,6 +406,26 @@ def preview_dataset(dataset_dir, num_samples=5, random_seed=42):
 def create_synthetic_drone_images(drone_model_path, background_dir, output_dir, num_images=100):
     """드론 모델을 다양한 배경에 합성하여 이미지 생성"""
     
+    # 드론 시그널 파일명에서 클래스 ID 추출 및 파일명 기반 이름 생성
+    # 예: signal_1.png -> 클래스 0, signal_2.png -> 클래스 1
+    drone_filename = os.path.basename(drone_model_path)
+    # 확장자 제거하여 기본 파일명 추출
+    drone_base_name = os.path.splitext(drone_filename)[0]
+    
+    # 파일명에서 숫자 추출
+    numbers = re.findall(r'\d+', drone_filename)
+    if numbers:
+        # 마지막 숫자를 사용하여 클래스 ID 결정 (signal_1 -> 클래스 0, signal_2 -> 클래스 1)
+        class_id = int(numbers[-1]) - 1
+        if class_id < 0:
+            class_id = 0
+    else:
+        # 숫자가 없으면 기본값 0 사용
+        class_id = 0
+        print(f"경고: 파일명에서 숫자를 찾을 수 없어 클래스 0을 사용합니다: {drone_filename}")
+    
+    print(f"드론 시그널: {drone_filename} -> 클래스 ID: {class_id}, 기본 파일명: {drone_base_name}")
+    
     # 드론 모델 이미지 로드 (알파 채널 포함)
     drone = cv2.imread(drone_model_path, cv2.IMREAD_UNCHANGED)
     
@@ -525,14 +546,18 @@ def create_synthetic_drone_images(drone_model_path, background_dir, output_dir, 
         drone_width = drone_w / bg_w
         drone_height = drone_h / bg_h
         
+        # 드론 파일명 기반으로 저장 파일명 생성
+        output_filename = f"{drone_base_name}_{i:04d}.png"
+        label_filename = f"{drone_base_name}_{i:04d}.txt"
+        
         # 이미지 저장
-        output_path = os.path.join(output_dir, f"synthetic_drone1_{i:04d}.png")
+        output_path = os.path.join(output_dir, output_filename)
         cv2.imwrite(output_path, background)
         
-        # 라벨 저장 (YOLO 형식)
-        label_path = os.path.join(output_dir, f"synthetic_drone1_{i:04d}.txt")
+        # 라벨 저장 (YOLO 형식) - 드론 시그널에 따라 클래스 ID 사용
+        label_path = os.path.join(output_dir, label_filename)
         with open(label_path, 'w') as f:
-            f.write(f"0 {drone_center_x} {drone_center_y} {drone_width} {drone_height}\n")
+            f.write(f"{class_id} {drone_center_x} {drone_center_y} {drone_width} {drone_height}\n")
     
     print(f"{num_images}개의 합성 이미지가 {output_dir}에 생성되었습니다.")
 
