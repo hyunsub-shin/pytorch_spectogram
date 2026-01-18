@@ -41,10 +41,10 @@ def main():
 
 
 if __name__ == "__main__":
-    img_size = (206, 889) # (h, w)
+    img_size = (1280) #(4096, 11999) #(206, 889) # (h, w)
     batch = 2
-    epochs = 100
-    weights = 'yolov5su.pt'
+    epochs = 10
+    weights = 'yolo11n.pt''
     data_yaml = 'drone_dataset.yaml'
 
     main()

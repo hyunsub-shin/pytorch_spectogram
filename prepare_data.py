@@ -120,6 +120,74 @@ def split_dataset(images_dir, labels_dir, masks_dir, output_dir, train_ratio=0.7
     print(f"검증: {len(splits['val'])} 파일")
     print(f"테스트: {len(splits['test'])} 파일")
 
+def split_dataset_sliced(image_dir, label_dir, output_base_dir, train_ratio=0.7, val_ratio=0.2, test_ratio=0.1, random_seed=42):
+    """
+    image_dir: 슬라이싱된 원본 이미지 폴더
+    label_dir: 슬라이싱된 원본 라벨 폴더
+    output_base_dir: 최종 데이터셋 루트
+            - images/train, images/val, images/test
+            - labels/train, labels/val, labels/test
+    """
+    # 1. 이미지 파일 목록 가져오기
+    all_images = [f for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
+    
+    # 2. 원본 이름 단위로 그룹화 (파일명 규칙: {name}_{x}_{y}.png)
+    original_groups = {}
+    for f in all_images:
+        parts = f.rsplit('_', 2)
+        orig_name = parts[0]
+        if orig_name not in original_groups:
+            original_groups[orig_name] = []
+        original_groups[orig_name].append(f)
+
+    # 3. 원본 이름 리스트 셔플 (랜덤성 부여)
+    orig_names = list(original_groups.keys())
+    random.seed(random_seed)
+    random.shuffle(orig_names)
+
+    # 4. 분할 지점 계산
+    total_count = len(orig_names)
+    train_end = int(total_count * train_ratio)
+    val_end = train_end + int(total_count * val_ratio)
+
+    split_map = {
+        'train': orig_names[:train_end],
+        'val': orig_names[train_end:val_end],
+        'test': orig_names[val_end:]
+    }
+
+    print(f"--- [데이터 분할 시작: 사용자 지정 구조] ---")
+    print(f"전체 원본 이미지 수: {total_count}")
+
+    # 5. 파일 복사 및 폴더 정리
+    for split_name, orig_list in split_map.items():
+        # 사용자 요청 구조: output_base_dir/images/train... 및 output_base_dir/labels/train...
+        target_img_dir = os.path.join(output_base_dir, 'images', split_name)
+        target_lbl_dir = os.path.join(output_base_dir, 'labels', split_name)
+        
+        os.makedirs(target_img_dir, exist_ok=True)
+        os.makedirs(target_lbl_dir, exist_ok=True)
+
+        for orig in tqdm(orig_list, desc=f"정리 중: {split_name}"):
+            for img_file in original_groups[orig]:
+                # 1. 이미지 복사 (src -> images/{train,val,test})
+                shutil.copy(
+                    os.path.join(image_dir, img_file), 
+                    os.path.join(target_img_dir, img_file)
+                )
+                
+                # 2. 대응하는 라벨 복사 (src -> labels/{train,val,test})
+                lbl_file = os.path.splitext(img_file)[0] + '.txt'
+                src_lbl_path = os.path.join(label_dir, lbl_file)
+                
+                if os.path.exists(src_lbl_path):
+                    shutil.copy(src_lbl_path, os.path.join(target_lbl_dir, lbl_file))
+
+    print(f"\n✅ 분할 완료!")
+    print(f"📂 구조 확인:")
+    print(f"   - {output_base_dir}/images/{{train, val, test}}")
+    print(f"   - {output_base_dir}/labels/{{train, val, test}}")
+
 def create_mask_from_bbox(image_path, label_path, output_path, dilation_size=5):
     """
     바운딩 박스로부터 마스크 이미지 생성
@@ -579,6 +647,16 @@ def main():
     split_parser.add_argument('--val', type=float, default=0.2, help='검증 데이터 비율')
     split_parser.add_argument('--test', type=float, default=0.1, help='테스트 데이터 비율')
     split_parser.add_argument('--seed', type=int, default=42, help='랜덤 시드')
+
+    # 슬라이싱 데이터셋 분할
+    split_sliced_parser = subparsers.add_parser('split_sliced', help='데이터셋을 학습/검증/테스트로 분할')
+    split_sliced_parser.add_argument('--images', type=str, required=True, help='이미지 디렉토리 경로')
+    split_sliced_parser.add_argument('--labels', type=str, required=True, help='라벨 디렉토리 경로')
+    split_sliced_parser.add_argument('--output', type=str, required=True, help='출력 디렉토리 경로')
+    split_sliced_parser.add_argument('--train', type=float, default=0.7, help='학습 데이터 비율')
+    split_sliced_parser.add_argument('--val', type=float, default=0.2, help='검증 데이터 비율')
+    split_sliced_parser.add_argument('--test', type=float, default=0.1, help='테스트 데이터 비율')
+    split_sliced_parser.add_argument('--seed', type=int, default=42, help='랜덤 시드')
     
     # 마스크 생성
     mask_parser = subparsers.add_parser('mask', help='바운딩 박스로부터 마스크 생성')
@@ -617,6 +695,9 @@ def main():
     elif args.command == 'split':
         split_dataset(args.images, args.labels, args.masks, args.output, 
                      args.train, args.val, args.test, args.seed)
+    elif args.command == 'split_sliced':
+        split_dataset_sliced(args.images, args.labels, args.output, 
+                     args.train, args.val, args.test, args.seed)
     elif args.command == 'mask':
         create_masks_for_dataset(args.dir, args.output, args.dilation)
     elif args.command == 'augment':
@@ -632,3 +713,15 @@ def main():
 
 if __name__ == "__main__":
     main() 
+
+########################################################
+## command example
+########################################################
+# # 드론 이미지 합성
+# python prepare_data_class_id.py synthetic --drone ./datasets/drone_data/signal/autelevo_01_sig_2.png --back ./datasets/drone_data/background --output ./datasets/synthetic --num 100
+
+# # 원본 이미지 분할    
+# python prepare_data_class_id.py split --images ./datasets/synthetic --labels ./datasets/synthetic --output ./datasets --train 0.7 --val 0.2 --test 0.1
+
+# # 슬라이싱 이미지 묶음 분할
+# python prepare_data_class_id.py split_sliced --images ./datasets/sliced_data/images --labels ./datasets/sliced_data/labels --output ./datasets --train 0.7 --val 0.2 --test 0.1
