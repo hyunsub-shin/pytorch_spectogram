@@ -98,7 +98,12 @@ def predict(image_path, save_dir, weights, confidence_threshold=0.5):
             # 텐서를 정수로 변환하여 문자열로 변환
             class_id = int(box.cls[0].item())  # 클래스 ID
             confidence = box.conf.item()  # 신뢰도
-            cv2.putText(img, f'{CLASS_NAMES[class_id]}: {confidence:.2f}', (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color=(255, 0, 0), thickness=2)
+            # 클래스 ID 범위 체크
+            if 0 <= class_id < len(CLASS_NAMES):
+                label = f'{CLASS_NAMES[class_id]}: {confidence:.2f}'
+            else:
+                label = f'Class{class_id}: {confidence:.2f}'  # 범위를 벗어나면 기본 형식 사용
+            cv2.putText(img, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color=(255, 0, 0), thickness=2)
             
     # 결과 이미지 저장
     cv2.imwrite(result_image_path, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))  # OpenCV는 BGR로 저장
@@ -164,16 +169,30 @@ def predict_with_slicing(image_path, save_dir, weights, tile_size=2560, overlap=
         # torchvision의 nms 함수 사용 (필요시 import)
         import torchvision
         keep_indices = torchvision.ops.nms(boxes_only, scores_only, iou_threshold=0.4)
-        final_detections = all_detections[keep_indices]
+        
+        # keep_indices를 numpy 배열로 변환하고 인덱싱
+        if len(keep_indices) > 0:
+            keep_indices_np = keep_indices.cpu().numpy()
+            final_detections = all_detections[keep_indices_np]
+            # 1차원 배열이면 2차원으로 변환 (단일 검출 결과인 경우)
+            if final_detections.ndim == 1:
+                final_detections = final_detections.reshape(1, -1)
+        else:
+            final_detections = np.array([]).reshape(0, 6)
     else:
-        final_detections = np.array([])
+        final_detections = np.array([]).reshape(0, 6)
 
     # 4. 시각화 및 저장
     display_img = original_img.copy()
     for det in final_detections:
         x1, y1, x2, y2, conf, cls = det
         cv2.rectangle(display_img, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 5)
-        label = f"{CLASS_NAMES[int(cls)]} {conf:.2f}"
+        # 클래스 ID 범위 체크
+        cls_int = int(cls)
+        if 0 <= cls_int < len(CLASS_NAMES):
+            label = f"{CLASS_NAMES[cls_int]} {conf:.2f}"
+        else:
+            label = f"Class{cls_int} {conf:.2f}"  # 범위를 벗어나면 기본 형식 사용
         cv2.putText(display_img, label, (int(x1), int(y1) - 10), 
                     cv2.FONT_HERSHEY_SIMPLEX, 2.0, (255, 0, 0), 3)
 
@@ -185,12 +204,13 @@ def predict_with_slicing(image_path, save_dir, weights, tile_size=2560, overlap=
     return final_detections
 
 if __name__ == "__main__":
-    CLASS_NAMES = ["drone"]
+    # drone_dataset.yaml의 names와 일치시켜야 함
+    CLASS_NAMES = ['mini', 'autelevo']
     # CLASS_NAMES = {0: 'person', 1: 'bicycle', 2: 'car', 3: 'motorcycle', 4: 'airplane', 5: 'bus', 6: 'train', 7: 'truck', 8: 'boat', 9: 
     #     'traffic light', 10: 'fire hydrant', 11: 'stop sign', 12: 'parking meter', 13: 'bench', 14: 'bird', 15: 'cat', 16: 'dog', 17: 'horse', 18: 'sheep', 19: 'cow', 20: 'elephant', 21: 'bear', 22: 'zebra', 23: 'giraffe', 24: 'backpack', 25: 'umbrella', 26: 'handbag', 27: 'tie', 28: 'suitcase', 29: 'frisbee', 30: 'skis', 31: 'snowboard', 32: 'sports ball', 33: 'kite', 34: 'baseball bat', 35: 'baseball glove', 36: 'skateboard', 37: 'surfboard', 38: 'tennis racket', 39: 'bottle', 40: 'wine glass', 41: 'cup', 42: 'fork', 43: 'knife', 44: 'spoon', 45: 'bowl', 46: 'banana', 47: 'apple', 48: 'sandwich', 49: 'orange', 50: 'broccoli', 51: 'carrot', 52: 'hot dog', 53: 'pizza', 54: 'donut', 55: 'cake', 56: 'chair', 
     #     57: 'couch', 58: 'potted plant', 59: 'bed', 60: 'dining table', 61: 'toilet', 62: 'tv', 63: 'laptop', 64: 'mouse', 65: 'remote', 66: 'keyboard', 67: 'cell phone', 68: 'microwave', 69: 'oven', 70: 'toaster', 71: 'sink', 72: 'refrigerator', 73: 'book', 74: 'clock', 75: 'vase', 76: 'scissors', 77: 'teddy bear', 78: 'hair drier', 79: 'toothbrush'}
     
-    image_path = 'datasets/drone_data/img/mini2_mini3_4.png'  # 예측할 이미지 경로
+    image_path = 'datasets/drone_data/img/mini2.png'  # 예측할 이미지 경로
     # image_path = 'drone_data/result_frame_138848079307226420_bw_125E+6.png'  # 예측할 이미지 경로
     save_directory = 'datasets'  # 결과를 저장할 사용자 지정 폴더
     # weights='last.pt'
