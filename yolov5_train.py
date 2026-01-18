@@ -34,6 +34,7 @@ def main():
         batch=batch,     # 배치 크기
         name='final',    # 결과 폴더 이름
         device=device,
+    #    freeze=10,       # 0~10번 레이어(Backbone 일부)를 고정
         verbose=True     # 진행률 표시
     )
 
@@ -44,7 +45,8 @@ if __name__ == "__main__":
     img_size = (1280) #(4096, 11999) #(206, 889) # (h, w)
     batch = 2
     epochs = 10
-    weights = 'yolo11n.pt''
+    weights = 'yolo11n.pt'
     data_yaml = 'drone_dataset.yaml'
 
     main()
+    
