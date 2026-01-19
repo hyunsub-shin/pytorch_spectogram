@@ -140,7 +140,14 @@ def predict_with_slicing(image_path, save_dir, weights, tile_size=2560, overlap=
             tile = original_img[y_start:y_end, x_start:x_end]
             
             # 모델 추론 (imgsz는 학습 시 설정한 1280 추천)
-            results = model.predict(tile, imgsz=1280, conf=confidence_threshold, verbose=False)
+            results = model.predict(
+                tile, 
+                imgsz=1280, 
+                conf=confidence_threshold, 
+                verbose=False, 
+                boxes=True,     # 박스 결과 출력 설정
+                masks=True      # 마스크(폴리곤) 결과 출력 설정 (Segmentation 모델일 경우에만 작동)
+            )
 
             # 2. 검출된 박스들을 원본 좌표로 변환
             for result in results:
