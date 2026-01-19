@@ -956,7 +956,7 @@ def main():
     synthetic_skeletal_parser.add_argument('--mask_type', type=str, default='line', help='마스크 타입 (line, polygon)')
 
     # 데이터셋셋 슬라이스
-    slicing_image_parser = subparsers.add_parser('img_slice', help='데이터셋 슬라이스 만들기(큰이미지를 작게 쪼개기기)')
+    slicing_image_parser = subparsers.add_parser('slice_image', help='데이터셋 슬라이스 만들기(큰이미지를 작게 쪼개기기)')
     slicing_image_parser.add_argument('--img_dir', type=str, required=True, help='이미지 디렉토리')
     slicing_image_parser.add_argument('--label_dir', type=str, required=True, help='라벨벨 디렉토리')
     slicing_image_parser.add_argument('--output_dir', type=str, required=True, help='출력 디렉토리')
