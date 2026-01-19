@@ -1007,6 +1007,8 @@ drone_path = './datasets/drone_data/signal/autelevo_05_sig_2.png'    # 사용할
 background_dir = './datasets/drone_data/background'     # 배경 이미지들이 들어있는 폴더 경로
 synthetic_output_dir = './datasets/synthetic' # 합성 이미지 저장될 경로
 sliced_out_dir = './datasets/synthetic/sliced_data'
+sliced_img_dir = './datasets/synthetic/sliced_data/images'
+sliced_label_dir = './datasets/synthetic/sliced_data/labels'
 final_output_dir = './datasets' # 최종 분할 데이터셋 저장될 경로
 
 # # 드론 이미지 합성 (박스 마스크 적용)
@@ -1015,7 +1017,7 @@ final_output_dir = './datasets' # 최종 분할 데이터셋 저장될 경로
 
 # # 드론 이미지 합성 (스케일럿 마스크 적용)
 # # python prepare_data.py synthetic_skeletal --drone ./datasets/drone_data/signal/signal_4.png --back_dir ./datasets/drone_data/background --output_dir ./datasets/synthetic --num 5 --mask_type line
-# synthesize_advanced(drone_path, background_dir, synthetic_output_dir, num_gen=50, mask_type='line') # mask_type='polygon')
+synthesize_advanced(drone_path, background_dir, synthetic_output_dir, num_gen=50, mask_type='line') # mask_type='polygon')
 
 # # 합성 이미지 슬라이싱
 # python prepare_data.py slice_image --img_dir ./datasets/drone_data/signal --label_dir ./datasets/drone_data/background --output_dir ./datasets/synthetic --size 2560 --overlap 0.3
@@ -1027,4 +1029,4 @@ batch_slice_yolo_polygon(img_dir, label_dir, sliced_out_dir, tile_size=2560, ove
 
 # # 슬라이싱 이미지 묶음 분할 (train, val, test)
 # # python prepare_data.py split_sliced --images ./datasets/synthetic/images --labels ./datasets/synthetic/labels --output ./datasets --train 0.7 --val 0.2 --test 0.1
-split_sliced_dataset(img_dir, label_dir, final_output_dir, train_ratio=0.7, val_ratio=0.2, test_ratio=0.1)
+split_sliced_dataset(sliced_img_dir, sliced_label_dir, final_output_dir, train_ratio=0.8, val_ratio=0.2, test_ratio=0.0)
