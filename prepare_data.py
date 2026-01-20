@@ -10,6 +10,203 @@ import glob
 from PIL import Image, ImageDraw
 from tqdm import tqdm
 
+##############################################################
+# polygon 산(/\_/\)모양도 바닥 선까지 만들기기
+##############################################################
+def get_signal_peak_points(img):
+    """노란색 점들의 중심 좌표(Peak)를 추출하여 정렬된 리스트로 반환"""
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+    lower_yellow = np.array([10, 50, 50])
+    upper_yellow = np.array([40, 255, 255])
+    binary_mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
+
+    contours, _ = cv2.findContours(
+        binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    peak_points = []
+    for cnt in contours:
+        M = cv2.moments(cnt)
+        if M["m00"] != 0:
+            cx = int(M["m10"] / M["m00"])
+            cy = int(M["m01"] / M["m00"])
+            peak_points.append([cx, cy])
+
+    if peak_points:
+        peak_points = sorted(peak_points, key=lambda x: x[0])
+
+    return binary_mask, peak_points
+
+def create_waveform_polygon(
+    peak_points,
+    rx,
+    ry,
+    img_w,
+    img_h,
+    peak_h=50,
+    valley_h=10
+):
+    pts = np.array(peak_points, dtype=np.float32)
+    pts[:, 0] += rx
+    pts[:, 1] += ry
+
+    upper_line = []
+
+    for i in range(len(pts)):
+        x, y = pts[i]
+
+        # 🔺 Peak
+        upper_line.append([x, max(0, y - peak_h)])
+
+        # 🔻 Valley
+        if i < len(pts) - 1:
+            nx, ny = pts[i + 1]
+            mid_x = (x + nx) / 2
+            mid_y = max(0, (y + ny) / 2 - valley_h)
+            upper_line.append([mid_x, mid_y])
+
+    # 🔥 핵심: 제일 아래 두 점을 연결
+    left_x, left_y = pts[0]
+    right_x, right_y = pts[-1]
+
+    bottom_y = max(left_y, right_y)
+
+    bottom_left = [left_x, bottom_y]
+    bottom_right = [right_x, bottom_y]
+
+    # 폴리곤 구성 (시계방향)
+    full_polygon = (
+        [bottom_left] +
+        upper_line +
+        [bottom_right]
+    )
+
+    poly = np.array(full_polygon, dtype=np.float32)
+
+    # 이미지 경계 클리핑
+    poly[:, 0] = np.clip(poly[:, 0], 0, img_w - 1)
+    poly[:, 1] = np.clip(poly[:, 1], 0, img_h - 1)
+
+    return poly
+
+def synthesize_advanced_mountain_shape(
+    signal_path,
+    bg_folder,
+    output_root,
+    num_gen=10,
+    mask_type='polygon'
+):
+    signal_name = os.path.splitext(os.path.basename(signal_path))[0]
+    class_id = extract_class_id(signal_name)
+
+    save_dirs = {
+        "images": os.path.join(output_root, "images"),
+        "labels": os.path.join(output_root, "labels"),
+        "debug": os.path.join(output_root, "debug"),
+    }
+    for p in save_dirs.values():
+        os.makedirs(p, exist_ok=True)
+
+    bg_list = [
+        f for f in glob.glob(os.path.join(bg_folder, "*.*"))
+        if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp'))
+    ]
+
+    if not bg_list:
+        print("❌ 배경 이미지가 없습니다.")
+        return
+
+    pattern_img = cv2.imread(signal_path)
+    binary_mask, peak_points = get_signal_peak_points(pattern_img)
+
+    if not peak_points:
+        print(f"❌ '{signal_name}'에서 peak를 찾지 못했습니다.")
+        return
+
+    # ✅ 올바른 boundingRect 계산
+    ys, xs = np.where(binary_mask > 0)
+    x, y, w, h = cv2.boundingRect(
+        np.column_stack((xs, ys)).astype(np.int32)
+    )
+
+    crop_img = pattern_img[y:y+h, x:x+w]
+    crop_binary = binary_mask[y:y+h, x:x+w]
+    adjusted_peaks = [[p[0] - x, p[1] - y] for p in peak_points]
+
+    print(f"🚀 '{signal_name}' (Class {class_id}) 합성 시작")
+
+    for i in range(num_gen):
+        bg = cv2.imread(random.choice(bg_list))
+        if bg is None:
+            continue
+
+        debug = bg.copy()
+        bg_h, bg_w = bg.shape[:2]
+
+        if bg_w <= w or bg_h <= h:
+            continue
+
+        rx = random.randint(0, bg_w - w)
+        ry = random.randint(0, bg_h - h)
+
+        roi = bg[ry:ry+h, rx:rx+w]
+        bg_part = cv2.bitwise_and(roi, roi, mask=cv2.bitwise_not(crop_binary))
+        fg_part = cv2.bitwise_and(crop_img, crop_img, mask=crop_binary)
+        bg[ry:ry+h, rx:rx+w] = cv2.add(bg_part, fg_part)
+
+        # 폴리곤 생성
+        final_poly = create_waveform_polygon(
+            adjusted_peaks,
+            rx,
+            ry,
+            img_w=bg_w,
+            img_h=bg_h,
+            peak_h=55,
+            valley_h=15
+        )
+
+        poly_draw = final_poly.astype(np.int32).reshape((-1, 1, 2))
+
+        # 🔴 디버그 시각화
+        cv2.polylines(
+            debug,
+            [poly_draw],
+            True,
+            (0, 0, 255),
+            3,
+            cv2.LINE_AA
+        )
+
+        for p in poly_draw:
+            cv2.circle(debug, tuple(p[0]), 3, (255, 0, 0), -1)
+
+        cv2.putText(
+            debug,
+            f"ID:{class_id}",
+            (poly_draw[0][0][0], max(0, poly_draw[0][0][1] - 10)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 0, 255),
+            2
+        )
+
+        # YOLO polygon label
+        poly_str = " ".join(
+            [f"{p[0]/bg_w:.6f} {p[1]/bg_h:.6f}" for p in final_poly]
+        )
+        label_line = f"{class_id} {poly_str}"
+
+        name = f"{signal_name}_{i:04d}"
+        cv2.imwrite(os.path.join(save_dirs["images"], f"{name}.png"), bg)
+        cv2.imwrite(os.path.join(save_dirs["debug"], f"{name}_debug.png"), debug)
+
+        with open(os.path.join(save_dirs["labels"], f"{name}.txt"), "w") as f:
+            f.write(label_line)
+
+    print(f"✅ 완료: {output_root}")
+####################################################################################
+
 def get_signal_skeleton_mask_line(img, thickness=2):
     """점들의 중심을 찾아 순서대로 선으로 연결한 골격 마스크 생성"""
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
@@ -78,7 +275,7 @@ def extract_class_id(filename):
         print(f"경고: 파일명에서 숫자를 찾을 수 없어 클래스 0을 사용합니다: {filename}")        
         return 0
 
-def synthesize_advanced(signal_path, bg_folder, output_root, num_gen=10, mask_type='line'):
+def synthesize_advanced(signal_path, bg_folder, output_root, num_gen=10, mask_type='polygon'):
     # 1. 파일 이름 설정 및 class ID 추출
     signal_basename = os.path.basename(signal_path)
     signal_name = os.path.splitext(signal_basename)[0]
@@ -92,7 +289,7 @@ def synthesize_advanced(signal_path, bg_folder, output_root, num_gen=10, mask_ty
     for p in save_dirs.values():
         os.makedirs(p, exist_ok=True)
 
-    bg_list = glob(os.path.join(bg_folder, "*.*"))
+    bg_list = glob.glob(os.path.join(bg_folder, "*.*"))
     bg_list = [f for f in bg_list if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp'))]
     
     if not bg_list:
@@ -167,7 +364,7 @@ def synthesize_advanced(signal_path, bg_folder, output_root, num_gen=10, mask_ty
             f.write('\n'.join(yolo_labels))
 
     print(f"✅ 완료: {output_root}")
-    
+
 def delete_files_with_suffix(directory, suffix):
     """
     특정 접미사를 포함하는 파일 삭제
@@ -953,7 +1150,15 @@ def main():
     synthetic_skeletal_parser.add_argument('--back_dir', type=str, required=True, help='백그라운드 이미지 디렉토리')
     synthetic_skeletal_parser.add_argument('--output_dir', type=str, required=True, help='출력 디렉토리')
     synthetic_skeletal_parser.add_argument('--num', type=int, default=5, help='이미지 생성 개수')
-    synthetic_skeletal_parser.add_argument('--mask_type', type=str, default='line', help='마스크 타입 (line, polygon)')
+    synthetic_skeletal_parser.add_argument('--mask_type', type=str, default='polygon', help='마스크 타입 (line, polygon)')
+
+    # 데이터셋 만들기 (mountain 모양 스케일럿 마스크 적용)
+    synthetic_skeletal_parser = subparsers.add_parser('synthetic_mountain', help='데이터셋 만들기 (신호 패턴이 쌍봉 모양일 경우 적용)')
+    synthetic_skeletal_parser.add_argument('--drone', type=str, required=True, help='드론 이미지')
+    synthetic_skeletal_parser.add_argument('--back_dir', type=str, required=True, help='백그라운드 이미지 디렉토리')
+    synthetic_skeletal_parser.add_argument('--output_dir', type=str, required=True, help='출력 디렉토리')
+    synthetic_skeletal_parser.add_argument('--num', type=int, default=5, help='이미지 생성 개수')
+    synthetic_skeletal_parser.add_argument('--mask_type', type=str, default='polygon', help='마스크 타입 (line, polygon)')
 
     # 데이터셋셋 슬라이스
     slicing_image_parser = subparsers.add_parser('slice_image', help='데이터셋 슬라이스 만들기(큰이미지를 작게 쪼개기기)')
@@ -988,6 +1193,8 @@ def main():
         create_synthetic_drone_images(args.drone, args.back, args.output, args.num)
     elif args.command == 'synthetic_skeletal':
         synthesize_advanced(args.drone, args.back_dir, args.output_dir, args.num, args.mask_type)
+    elif args.command == 'synthetic_mountain':
+        synthesize_advanced_mountain_shape(args.drone, args.back_dir, args.output_dir, args.num, args.mask_type)
     elif args.command == 'slice_image':
         batch_slice_yolo_polygon(args.img_dir, args.label_dir, args.output_dir, args.size, args.overlap)
     elif args.command == 'delete':
@@ -1001,32 +1208,48 @@ if __name__ == "__main__":
 ########################################################
 ## command example
 ########################################################
-img_dir = './datasets/synthetic/images'
-label_dir = './datasets/synthetic/labels'
-drone_path = './datasets/drone_data/signal/autelevo_05_sig_2.png'    # 사용할 시그널 이미지 파일
+drone_path = './datasets/drone_data/signal/mini2_mini3_sig_1.png'    # 사용할 시그널 이미지 파일
 background_dir = './datasets/drone_data/background'     # 배경 이미지들이 들어있는 폴더 경로
 synthetic_output_dir = './datasets/synthetic' # 합성 이미지 저장될 경로
+img_dir = './datasets/synthetic/images'
+label_dir = './datasets/synthetic/labels'
 sliced_out_dir = './datasets/synthetic/sliced_data'
 sliced_img_dir = './datasets/synthetic/sliced_data/images'
 sliced_label_dir = './datasets/synthetic/sliced_data/labels'
 final_output_dir = './datasets' # 최종 분할 데이터셋 저장될 경로
 
+##############################################
 # # 드론 이미지 합성 (박스 마스크 적용)
+##############################################
 # # python prepare_data.py synthetic --drone ./datasets/drone_data/signal/autelevo_01_sig_2.png --back ./datasets/drone_data/background --output ./datasets/synthetic --num 100
 # create_synthetic_drone_images(drone_path, background_dir, synthetic_output_dir, num_images=50)
 
+##############################################
 # # 드론 이미지 합성 (스케일럿 마스크 적용)
+##############################################
 # # python prepare_data.py synthetic_skeletal --drone ./datasets/drone_data/signal/signal_4.png --back_dir ./datasets/drone_data/background --output_dir ./datasets/synthetic --num 5 --mask_type line
-synthesize_advanced(drone_path, background_dir, synthetic_output_dir, num_gen=50, mask_type='line') # mask_type='polygon')
+synthesize_advanced(drone_path, background_dir, synthetic_output_dir, num_gen=50, mask_type='polygon') # mask_type='line')
 
+##############################################
+# # 드론 이미지 합성 (산모양 스케일럿 마스크 적용) - 신호 패턴이 쌍봉 모양일 경우 적용
+##############################################
+# # python prepare_data.py synthetic_mountain --drone ./datasets/drone_data/signal/signal_4.png --back_dir ./datasets/drone_data/background --output_dir ./datasets/synthetic --num 5 --mask_type line
+# synthesize_advanced_mountain_shape(drone_path, background_dir, synthetic_output_dir, num_gen=2, mask_type='polygon')
+
+##############################################
 # # 합성 이미지 슬라이싱
+##############################################
 # python prepare_data.py slice_image --img_dir ./datasets/drone_data/signal --label_dir ./datasets/drone_data/background --output_dir ./datasets/synthetic --size 2560 --overlap 0.3
-batch_slice_yolo_polygon(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.3)
+# batch_slice_yolo_polygon(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.3)
 
-# # 원본 이미지 분할 (train, val, test)   
+##############################################
+# # 원본 이미지 분할 (train, val, test)  
+# ############################################## 
 # # python prepare_data.py split --images ./datasets/synthetic --labels ./datasets/synthetic --output ./datasets --train 0.7 --val 0.2 --test 0.1
 # split_dataset(img_dir, label_dir, None, final_output_dir, train_ratio=0.7, val_ratio=0.2, test_ratio=0.1)
 
+##############################################
 # # 슬라이싱 이미지 묶음 분할 (train, val, test)
+##############################################
 # # python prepare_data.py split_sliced --images ./datasets/synthetic/images --labels ./datasets/synthetic/labels --output ./datasets --train 0.7 --val 0.2 --test 0.1
-split_sliced_dataset(sliced_img_dir, sliced_label_dir, final_output_dir, train_ratio=0.8, val_ratio=0.2, test_ratio=0.0)
+# split_sliced_dataset(sliced_img_dir, sliced_label_dir, final_output_dir, train_ratio=0.8, val_ratio=0.2, test_ratio=0.0)
