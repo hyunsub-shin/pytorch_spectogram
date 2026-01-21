@@ -34,81 +34,146 @@ def video():
     cap.release()
     cv2.destroyAllWindows()
     
+# def predict(image_path, save_dir, weights, confidence_threshold=0.5):
+#     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+#     # device = "cpu"
+#     print(f"사용 장치: {device}")
+
+#     # YOLOv5 모델 로드 (학습된 가중치 사용)
+#     model = YOLO(weights).to(device)
+
+#     # 이미지 로드
+#     img = cv2.imread(image_path)
+#     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # OpenCV는 BGR로 이미지를 로드하므로 RGB로 변환
+
+#     # 예측 수행
+#     with torch.no_grad():  # 기울기 계산 비활성화
+#         results = model(img)
+
+#     # 결과가 리스트인지 확인
+#     if isinstance(results, list):
+#         # 각 결과에서 바운딩 박스 정보 추출
+#         boxes = []
+#         for result in results:
+#             if hasattr(result, 'boxes'):
+#                 boxes.append(result.boxes.xyxy.cpu().numpy())  # 바운딩 박스 좌표를 NumPy 배열로 변환
+
+#         # boxes가 비어 있지 않은 경우
+#         if boxes:
+#             boxes = np.concatenate(boxes)  # 모든 박스를 하나의 NumPy 배열로 결합
+#             print("Extracted bounding boxes:", boxes)
+#         else:
+#             print("No bounding boxes found.")
+#             return np.array([])  # 빈 배열 반환
+#     else:
+#         print("Results is not a list.")
+#         return np.array([])  # 빈 배열 반환
+
+#     # 예측 결과를 confidence threshold에 따라 필터링
+#     # 결과 필터링: 신뢰도가 threshold 이상인 경우만 표시
+#     if len(results) > 0:
+#         filtered_results = results[0].boxes[results[0].boxes.conf >= confidence_threshold]  # 신뢰도 필터링
+#     else:
+#         print("No predictions were made.")
+#         return np.array([])  # 빈 배열 반환
+
+#     # 결과 시각화
+#     if len(filtered_results) > 0:
+#         results[0].show()  # 첫 번째 결과를 화면에 표시
+#     else:
+#         print("No detections above the confidence threshold.")
+
+#     # 결과 저장 폴더가 없으면 생성
+#     os.makedirs(save_dir, exist_ok=True)
+
+#     # 결과를 지정한 폴더에 PNG 형식으로 저장
+#     result_image_path = os.path.join(save_dir, 'result.png')  # 저장할 파일 경로
+#     # 결과 저장
+#     os.makedirs(save_dir, exist_ok=True)
+#     img_filename = os.path.basename(image_path)
+#     save_filename = f"result_{img_filename}"
+#     result_image_path = os.path.join(save_dir, save_filename)
+
+#     # 필터링된 결과를 기반으로 이미지 저장
+#     if len(filtered_results) > 0:
+#         # 필터링된 결과를 이미지에 그리기
+#         for box in filtered_results:
+#             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()  # 바운딩 박스 좌표
+#             cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), color=(255, 0, 0), thickness=2)  # 바운딩 박스 그리기
+#             # 텐서를 정수로 변환하여 문자열로 변환
+#             class_id = int(box.cls[0].item())  # 클래스 ID
+#             confidence = box.conf.item()  # 신뢰도
+#             # 클래스 ID 범위 체크
+#             if 0 <= class_id < len(CLASS_NAMES):
+#                 label = f'{CLASS_NAMES[class_id]}: {confidence:.2f}'
+#             else:
+#                 label = f'Class{class_id}: {confidence:.2f}'  # 범위를 벗어나면 기본 형식 사용
+#             cv2.putText(img, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color=(255, 0, 0), thickness=2)
+            
+#     # 결과 이미지 저장
+#     cv2.imwrite(result_image_path, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))  # OpenCV는 BGR로 저장
+
+#     return filtered_results.cpu().numpy()  # CUDA 텐서를 CPU로 이동 후 NumPy 배열로 변환
+
 def predict(image_path, save_dir, weights, confidence_threshold=0.5):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # device = "cpu"
     print(f"사용 장치: {device}")
 
-    # YOLOv5 모델 로드 (학습된 가중치 사용)
+    # 1. 모델 로드
     model = YOLO(weights).to(device)
 
-    # 이미지 로드
+    # 2. 이미지 로드 (OpenCV 기본 BGR 유지 - 시각화 편의성)
     img = cv2.imread(image_path)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # OpenCV는 BGR로 이미지를 로드하므로 RGB로 변환
+    if img is None:
+        print(f"이미지를 찾을 수 없습니다: {image_path}")
+        return np.array([])
+    
+    # 3. 예측 수행
+    results = model.predict(img, conf=confidence_threshold, device=device, verbose=False)
+    
+    # 결과가 비어있는 경우 처리
+    if len(results) == 0 or len(results[0].boxes) == 0:
+        print("검출된 객체가 없습니다.")
+        return np.array([])
 
-    # 예측 수행
-    with torch.no_grad():  # 기울기 계산 비활성화
-        results = model(img)
+    result = results[0] # 첫 번째 이미지 결과
+    boxes = result.boxes # 필터링은 이미 model.predict(conf=...)에서 완료됨
 
-    # 결과가 리스트인지 확인
-    if isinstance(results, list):
-        # 각 결과에서 바운딩 박스 정보 추출
-        boxes = []
-        for result in results:
-            if hasattr(result, 'boxes'):
-                boxes.append(result.boxes.xyxy.cpu().numpy())  # 바운딩 박스 좌표를 NumPy 배열로 변환
-
-        # boxes가 비어 있지 않은 경우
-        if boxes:
-            boxes = np.concatenate(boxes)  # 모든 박스를 하나의 NumPy 배열로 결합
-            print("Extracted bounding boxes:", boxes)
-        else:
-            print("No bounding boxes found.")
-            return np.array([])  # 빈 배열 반환
-    else:
-        print("Results is not a list.")
-        return np.array([])  # 빈 배열 반환
-
-    # 예측 결과를 confidence threshold에 따라 필터링
-    # 결과 필터링: 신뢰도가 threshold 이상인 경우만 표시
-    if len(results) > 0:
-        filtered_results = results[0].boxes[results[0].boxes.conf >= confidence_threshold]  # 신뢰도 필터링
-    else:
-        print("No predictions were made.")
-        return np.array([])  # 빈 배열 반환
-
-    # 결과 시각화
-    if len(filtered_results) > 0:
-        results[0].show()  # 첫 번째 결과를 화면에 표시
-    else:
-        print("No detections above the confidence threshold.")
-
-    # 결과 저장 폴더가 없으면 생성
+    # 4. 시각화 및 저장 설정
     os.makedirs(save_dir, exist_ok=True)
+    img_filename = os.path.basename(image_path)
+    save_filename = f"result_{img_filename}"
+    result_image_path = os.path.join(save_dir, save_filename)
 
-    # 결과를 지정한 폴더에 PNG 형식으로 저장
-    result_image_path = os.path.join(save_dir, 'result.png')  # 저장할 파일 경로
+    # 그리기용 이미지 복사
+    display_img = img.copy()
 
-    # 필터링된 결과를 기반으로 이미지 저장
-    if len(filtered_results) > 0:
-        # 필터링된 결과를 이미지에 그리기
-        for box in filtered_results:
-            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()  # 바운딩 박스 좌표
-            cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), color=(255, 0, 0), thickness=2)  # 바운딩 박스 그리기
-            # 텐서를 정수로 변환하여 문자열로 변환
-            class_id = int(box.cls[0].item())  # 클래스 ID
-            confidence = box.conf.item()  # 신뢰도
-            # 클래스 ID 범위 체크
-            if 0 <= class_id < len(CLASS_NAMES):
-                label = f'{CLASS_NAMES[class_id]}: {confidence:.2f}'
-            else:
-                label = f'Class{class_id}: {confidence:.2f}'  # 범위를 벗어나면 기본 형식 사용
-            cv2.putText(img, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color=(255, 0, 0), thickness=2)
-            
-    # 결과 이미지 저장
-    cv2.imwrite(result_image_path, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))  # OpenCV는 BGR로 저장
+    for box in boxes:
+        # 좌표 추출 (xyxy)
+        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+        cls_id = int(box.cls[0].item())
+        conf = box.conf[0].item()
 
-    return filtered_results.cpu().numpy()  # CUDA 텐서를 CPU로 이동 후 NumPy 배열로 변환
+        # 색상 설정 (BGR: 빨간색)
+        color = (0, 0, 255) 
+
+        # 바운딩 박스 그리기
+        cv2.rectangle(display_img, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+
+        # 라벨 생성
+        label_name = CLASS_NAMES[cls_id] if cls_id < len(CLASS_NAMES) else f"Class{cls_id}"
+        label_str = f"{label_name}: {conf:.2f}"
+        
+        # 텍스트 그리기
+        cv2.putText(display_img, label_str, (int(x1), int(y1) - 10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+    # 5. 결과 저장
+    cv2.imwrite(result_image_path, display_img)
+    print(f"✅ 결과 저장 완료: {result_image_path}")
+
+    # 6. 넘파이 배열로 결과 반환 (좌표, 신뢰도, 클래스 포함)
+    return boxes.data.cpu().numpy()
 
 def predict_with_slicing(image_path, save_dir, weights, tile_size=2560, overlap=0.3, confidence_threshold=0.5):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -266,7 +331,7 @@ if __name__ == "__main__":
     confidence_threshold = 0.5  # 신뢰도 임계값 설정
 
     ###############################################################################
-    # # 원본 이미지 추론 실행
+    # 원본 이미지 추론 실행
     ###############################################################################
     # predictions = predict(
     #     image_path, 
