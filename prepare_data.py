@@ -156,14 +156,18 @@ def synthesize_advanced_mountain_shape(
         bg[ry:ry+h, rx:rx+w] = cv2.add(bg_part, fg_part)
 
         # 폴리곤 생성
+        # 고정값 대신 약간의 랜덤 범위를 주면 증강(Augmentation) 효과가 납니다.
+        rand_peak = random.randint(45, 65)    # 산 높이에 변화
+        rand_valley = random.randint(10, 20)  # 골짜기 깊이에 변화
+
         final_poly = create_waveform_polygon(
             adjusted_peaks,
             rx,
             ry,
             img_w=bg_w,
             img_h=bg_h,
-            peak_h=55,
-            valley_h=15
+            peak_h=rand_peak,
+            valley_h=rand_valley
         )
 
         poly_draw = final_poly.astype(np.int32).reshape((-1, 1, 2))
@@ -986,8 +990,10 @@ def create_synthetic_drone_images(drone_model_path, background_dir, output_dir, 
     
     print(f"{num_images}개의 합성 이미지가 {output_dir}에 생성되었습니다.")
 
+#############################
+# 객체 포함 여부 판단 정밀화 
+#############################
 def batch_slice_yolo_polygon(input_img_dir, input_label_dir, output_dir, tile_size=1024, overlap=0.1):
-    # 1. 경로 설정
     out_img_path = os.path.join(output_dir, 'images')
     out_label_path = os.path.join(output_dir, 'labels')
     os.makedirs(out_img_path, exist_ok=True)
@@ -1004,8 +1010,7 @@ def batch_slice_yolo_polygon(input_img_dir, input_label_dir, output_dir, tile_si
         img_name = os.path.splitext(os.path.basename(img_path))[0]
         label_path = os.path.join(input_label_dir, f"{img_name}.txt")
 
-        if not os.path.exists(label_path):
-            continue
+        if not os.path.exists(label_path): continue
 
         image = cv2.imread(img_path)
         if image is None: continue
@@ -1028,60 +1033,51 @@ def batch_slice_yolo_polygon(input_img_dir, input_label_dir, output_dir, tile_si
 
                 for line in lines:
                     parts = line.strip().split()
-                    if len(parts) < 5: continue # 최소 class + 4개좌표 필요
+                    if len(parts) < 5: continue
                     
                     class_id = parts[0]
                     coords = list(map(float, parts[1:]))
                     
-                    # 박스 라벨 형식인지 확인 (5개 토큰: cls xc yc w h)
-                    if len(parts) == 5:
-                        # 박스 라벨 처리: cls xc yc w h -> 폴리곤 좌표로 변환
-                        xc_n, yc_n, w_n, h_n = coords
-                        
-                        # 픽셀 좌표로 복원
-                        abs_xc = xc_n * w
-                        abs_yc = yc_n * h
-                        abs_w = w_n * w
-                        abs_h = h_n * h
-                        
-                        # 박스의 4개 모서리 좌표 계산
-                        x1 = abs_xc - abs_w / 2
-                        y1 = abs_yc - abs_h / 2
-                        x2 = abs_xc + abs_w / 2
-                        y2 = abs_yc - abs_h / 2
-                        x3 = abs_xc + abs_w / 2
-                        y3 = abs_yc + abs_h / 2
-                        x4 = abs_xc - abs_w / 2
-                        y4 = abs_yc + abs_h / 2
-                        
-                        px_pts = [(x1, y1), (x2, y2), (x3, y3), (x4, y4)]
-                    else:
-                        # 폴리곤 라벨 형식: cls x1 y1 x2 y2 x3 y3 ...
-                        # 픽셀 좌표로 복원
-                        px_pts = []
+                    # 픽셀 좌표 복원
+                    px_pts = []
+                    if len(parts) == 5: # Bbox (xc, yc, w, h)
+                        abs_xc, abs_yc = coords[0] * w, coords[1] * h
+                        abs_w, abs_h = coords[2] * w, coords[3] * h
+                        px_pts = [
+                            (abs_xc - abs_w/2, abs_yc - abs_h/2),
+                            (abs_xc + abs_w/2, abs_yc - abs_h/2),
+                            (abs_xc + abs_w/2, abs_yc + abs_h/2),
+                            (abs_xc - abs_w/2, abs_yc + abs_h/2)
+                        ]
+                    else: # Polygon (x1, y1, x2, y2, ...)
                         for i in range(0, len(coords), 2):
                             px_pts.append((coords[i] * w, coords[i+1] * h))
                     
-                    # --- [핵심] 타일 내부에 포함된 점들만 필터링 및 변환 ---
-                    new_poly = []
+                    # --- [수정 및 강화된 로직] ---
+                    # 1. 객체의 점들 중 하나라도 실제 타일 영역 안에 있는지 확인
+                    is_inside = False
                     for pt_x, pt_y in px_pts:
-                        # 1. 점이 타일 밖에 있더라도 타일 경계선으로 강제 고정 (Clamping)
-                        # 이를 통해 잘린 객체도 타일 경계에 붙은 올바른 폴리곤 형태를 유지함
-                        cx = max(x_start, min(pt_x, x_end))
-                        cy = max(y_start, min(pt_y, y_end))
-                        
-                        # 2. 타일 상대 좌표로 변환 및 정규화
-                        # 타일 내에서의 0.0 ~ 1.0 사이 값으로 변환함
-                        nx = (cx - x_start) / (x_end - x_start) 
-                        ny = (cy - y_start) / (y_end - y_start)
-                        new_poly.append(f"{nx:.6f} {ny:.6f}")
+                        if x_start <= pt_x <= x_end and y_start <= pt_y <= y_end:
+                            is_inside = True
+                            break
+                    
+                    # 2. 객체가 타일에 포함된 경우에만 처리
+                    if is_inside:
+                        new_poly = []
+                        for pt_x, pt_y in px_pts:
+                            # 타일 경계로 고정
+                            cx = max(x_start, min(pt_x, x_end))
+                            cy = max(y_start, min(pt_y, y_end))
+                            # 상대 좌표 변환 및 정규화
+                            nx = (cx - x_start) / tile_size
+                            ny = (cy - y_start) / tile_size
+                            new_poly.append(f"{nx:.6f} {ny:.6f}")
 
-                    # 3. 중복된 점 제거 및 유효성 검사
-                    # 폴리곤은 최소 3개의 서로 다른 점이 있어야 유효한 라벨이 됨
-                    if len(set(new_poly)) >= 3:
-                        tile_labels.append(f"{class_id} {' '.join(new_poly)}")
+                        # 유효한 폴리곤인지 확인 (점 6개 이상)
+                        if len(set(new_poly)) >= 6: # 3:
+                            tile_labels.append(f"{class_id} {' '.join(new_poly)}")
 
-                # 객체가 있는 타일만 저장
+                # --- [핵심] 객체가 발견된 타일만 저장 ---
                 if tile_labels:
                     tile_img = image[y_start:y_end, x_start:x_end]
                     save_name = f"{img_name}_{x_start}_{y_start}"
@@ -1089,6 +1085,238 @@ def batch_slice_yolo_polygon(input_img_dir, input_label_dir, output_dir, tile_si
                     cv2.imwrite(os.path.join(out_img_path, f"{save_name}.jpg"), tile_img)
                     with open(os.path.join(out_label_path, f"{save_name}.txt"), 'w') as f_out:
                         f_out.write("\n".join(tile_labels))
+#############################
+
+def batch_slice_yolo_polygon_integrated(input_img_dir, input_label_dir, output_dir, tile_size=1024, overlap=0.2):
+    """
+    산 모양 폴리곤 라벨을 지원하는 정밀 슬라이싱 함수
+    """
+    out_img_path = os.path.join(output_dir, 'images')
+    out_label_path = os.path.join(output_dir, 'labels')
+    os.makedirs(out_img_path, exist_ok=True)
+    os.makedirs(out_label_path, exist_ok=True)
+                                                          
+    img_files = []
+    for ext in ['*.jpg', '*.jpeg', '*.png', '*.bmp']:
+        img_files.extend(glob.glob(os.path.join(input_img_dir, ext)))
+
+    print(f"🚀 산 모양 폴리곤 통합 슬라이싱 시작: {len(img_files)}개 파일")
+
+    for img_path in tqdm(img_files):
+        img_name = os.path.splitext(os.path.basename(img_path))[0]
+        label_path = os.path.join(input_label_dir, f"{img_name}.txt")
+
+        if not os.path.exists(label_path): continue
+
+        image = cv2.imread(img_path)
+        if image is None: continue
+        h, w, _ = image.shape
+        
+        with open(label_path, 'r') as f:
+            lines = f.readlines()
+
+        step = int(tile_size * (1 - overlap))
+
+        for y in range(0, h, step):
+            for x in range(0, w, step):
+                # 타일 범위 결정 (이미지 끝단 처리)
+                x_end = min(x + tile_size, w)
+                y_end = min(y + tile_size, h)
+                x_start = max(0, x_end - tile_size)
+                y_start = max(0, y_end - tile_size)
+
+                tile_labels = []
+
+                for line in lines:
+                    parts = line.strip().split()
+                    if not parts: continue
+                    
+                    class_id = parts[0]
+                    coords = list(map(float, parts[1:]))
+
+                    if len(coords) == 4: # 박스 형식 (xc, yc, w, h)인 경우
+                        xc, yc, w_val, h_val = coords
+                        # 4개의 폴리곤 점으로 변환하여 px_pts 생성
+                        px_pts = np.array([
+                            [xc - w_val/2, yc - h_val/2], [xc + w_val/2, yc - h_val/2],
+                            [xc + w_val/2, yc + h_val/2], [xc - w_val/2, yc + h_val/2]
+                        ]) * [w, h]
+                    else: # 폴리곤 형식인 경우
+                        px_pts = np.array(coords).reshape(-1, 2) * [w, h]
+
+                    # 1. 객체의 점들이 현재 타일 안에 하나라도 있는지 체크
+                    # 산 모양의 경우 Peak 중 하나라도 타일에 들어와야 유효함
+                    inside_mask = (px_pts[:, 0] >= x_start) & (px_pts[:, 0] <= x_end) & \
+                                  (px_pts[:, 1] >= y_start) & (px_pts[:, 1] <= y_end)
+                    
+                    # 경계에 걸릴 경우 클리핑
+                    if np.any(inside_mask):
+                        # 2. 타일 경계로 클리핑 (Clamping)
+                        # 산 모양의 굴곡이 타일 밖으로 나가도 경계선에 붙여서 형태 유지                                                                      
+                        new_poly = []
+                        for pt_x, pt_y in px_pts:  
+                            cx = np.clip(pt_x, x_start, x_end)
+                            cy = np.clip(pt_y, y_start, y_end)
+                            
+                            # 3. 타일 상대 좌표로 변환 및 정규화
+                            nx = (cx - x_start) / tile_size
+                            ny = (cy - y_start) / tile_size
+                            new_poly.append(f"{nx:.6f} {ny:.6f}")
+
+                        # 4. 유효성 검사 (점 중복 제거 후 면적이 형성되는지 확인)
+                        if len(set(new_poly)) >= 6: # 3:
+                            tile_labels.append(f"{class_id} {' '.join(new_poly)}")
+
+                # 5. 라벨이 존재하는 타일만 파일로 저장
+                if tile_labels:
+                    tile_img = image[y_start:y_end, x_start:x_end]
+                    save_name = f"{img_name}_tile_{x_start}_{y_start}"
+                    
+                    cv2.imwrite(os.path.join(out_img_path, f"{save_name}.png"), tile_img)
+                    with open(os.path.join(out_label_path, f"{save_name}.txt"), 'w') as f_out:
+                        f_out.write("\n".join(tile_labels))
+
+    print(f"✅ 슬라이싱 완료. 저장경로: {output_dir}")
+
+def batch_slice_yolo_polygon_complete_only(input_img_dir, input_label_dir, output_dir, tile_size=1024, overlap=0.3):
+    """
+    경계에 걸린 객체는 무시하고, 타일 내부에 완전히 포함된 객체만 저장하는 함수
+    """
+    out_img_path = os.path.join(output_dir, 'images')
+    out_label_path = os.path.join(output_dir, 'labels')
+    os.makedirs(out_img_path, exist_ok=True)
+    os.makedirs(out_label_path, exist_ok=True)
+
+    img_files = []
+    for ext in ['*.jpg', '*.jpeg', '*.png', '*.bmp']:
+        img_files.extend(glob.glob(os.path.join(input_img_dir, ext)))
+
+    print(f"🚀 완전 포함 객체 전용 슬라이싱 시작: {len(img_files)}개 파일")
+
+    for img_path in tqdm(img_files):
+        img_name = os.path.splitext(os.path.basename(img_path))[0]
+        label_path = os.path.join(input_label_dir, f"{img_name}.txt")
+        if not os.path.exists(label_path): continue
+
+        image = cv2.imread(img_path)
+        if image is None: continue
+        h, w, _ = image.shape
+        
+        with open(label_path, 'r') as f:
+            lines = f.readlines()
+
+        # 경계 무시 모드에서는 Overlap을 0.3 정도로 높게 잡는 것을 권장합니다.
+        step = int(tile_size * (1 - overlap))
+
+        for y in range(0, h, step):
+            for x in range(0, w, step):
+                x_end = min(x + tile_size, w)
+                y_end = min(y + tile_size, h)
+                x_start = max(0, x_end - tile_size)
+                y_start = max(0, y_end - tile_size)
+
+                tile_labels = []
+
+                for line in lines:
+                    parts = line.strip().split()
+                    if not parts: continue
+                    
+                    class_id = parts[0]
+                    coords = list(map(float, parts[1:]))
+
+                    # 1. 좌표 복원 및 점 배열 생성
+                    if len(coords) == 4: # Bbox
+                        xc, yc, w_val, h_val = coords
+                        px_pts = np.array([
+                            [xc - w_val/2, yc - h_val/2], [xc + w_val/2, yc - h_val/2],
+                            [xc + w_val/2, yc + h_val/2], [xc - w_val/2, yc + h_val/2]
+                        ]) * [w, h]
+                    else: # Polygon
+                        px_pts = np.array(coords).reshape(-1, 2) * [w, h]
+
+                    # 2. 핵심 로직: 모든 점이 타일 영역 내부에 있는지 체크 (np.all)
+                    inside_mask = (px_pts[:, 0] >= x_start) & (px_pts[:, 0] <= x_end) & \
+                                  (px_pts[:, 1] >= y_start) & (px_pts[:, 1] <= y_end)
+                    
+                    if np.all(inside_mask): # 하나라도 밖에 있으면 False
+                        new_poly = []
+                        for pt_x, pt_y in px_pts:
+                            # 모든 점이 내부에 있으므로 clip은 사실상 예외 방지용
+                            nx = (pt_x - x_start) / tile_size
+                            ny = (pt_y - y_start) / tile_size
+                            new_poly.append(f"{nx:.6f} {ny:.6f}")
+
+                        if len(new_poly) >= 3:
+                            tile_labels.append(f"{class_id} {' '.join(new_poly)}")
+
+                # 3. 온전한 객체가 하나라도 있는 타일만 저장
+                if tile_labels:
+                    tile_img = image[y_start:y_end, x_start:x_end]
+                    save_name = f"{img_name}_tile_{x_start}_{y_start}"
+                    cv2.imwrite(os.path.join(out_img_path, f"{save_name}.png"), tile_img)
+                    with open(os.path.join(out_label_path, f"{save_name}.txt"), 'w') as f_out:
+                        f_out.write("\n".join(tile_labels))
+
+def create_tile_gallery(sliced_img_dir, sliced_label_dir, output_file, grid_size=(4, 4), thumb_size=(400, 400)):
+    """
+    슬라이싱된 타일들과 라벨을 시각화하여 하나의 큰 갤러리 이미지로 저장
+    """
+    img_list = glob.glob(os.path.join(sliced_img_dir, "*.png")) + \
+               glob.glob(os.path.join(sliced_img_dir, "*.jpg"))
+    
+    if not img_list:
+        print("❌ 시각화할 타일 이미지가 없습니다.")
+        return
+
+    # 최신 생성된 파일 순으로 정렬하거나 랜덤 선택
+    np.random.shuffle(img_list)
+    selected_imgs = img_list[:grid_size[0] * grid_size[1]]
+
+    gallery_rows = []
+    for i in range(grid_size[0]):
+        row_imgs = []
+        for j in range(grid_size[1]):
+            idx = i * grid_size[1] + j
+            if idx >= len(selected_imgs):
+                # 빈 칸은 검은색 이미지로 채움
+                row_imgs.append(np.zeros((thumb_size[1], thumb_size[0], 3), dtype=np.uint8))
+                continue
+
+            # 이미지 로드 및 리사이즈
+            img_path = selected_imgs[idx]
+            img = cv2.imread(img_path)
+            h, w = img.shape[:2]
+            
+            # 해당 라벨 찾기
+            label_path = os.path.join(sliced_label_dir, os.path.splitext(os.path.basename(img_path))[0] + ".txt")
+            
+            if os.path.exists(label_path):
+                with open(label_path, 'r') as f:
+                    for line in f:
+                        parts = line.strip().split()
+                        if not parts: continue
+                        
+                        # 폴리곤 좌표 복원 (정규화 -> 픽셀)
+                        coords = np.array(list(map(float, parts[1:]))).reshape(-1, 2)
+                        px_pts = (coords * [w, h]).astype(np.int32)
+                        
+                        # 타일에 라벨 그리기 (노란색 선 + 빨간색 점)
+                        cv2.polylines(img, [px_pts.reshape((-1, 1, 2))], True, (0, 255, 255), 2)
+                        for pt in px_pts:
+                            cv2.circle(img, tuple(pt), 4, (0, 0, 255), -1)
+
+            # 썸네일 크기로 변환
+            thumb = cv2.resize(img, thumb_size)
+            # 타일 파일명 기입 (옵션)
+            cv2.putText(thumb, os.path.basename(img_path)[:15], (10, 25), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            row_imgs.append(thumb)
+
+        gallery_rows.append(np.hstack(row_imgs))
+
+    final_gallery = np.vstack(gallery_rows)
+    cv2.imwrite(output_file, final_gallery)
+    print(f"✅ 갤러리 생성 완료: {output_file}")
 
 def main():
     parser = argparse.ArgumentParser(description="객체 인식 데이터셋 준비 도구")
@@ -1136,6 +1364,13 @@ def main():
     preview_parser.add_argument('--dir', type=str, required=True, help='데이터셋 디렉토리')
     preview_parser.add_argument('--num', type=int, default=5, help='미리볼 샘플 수')
     preview_parser.add_argument('--seed', type=int, default=42, help='랜덤 시드')
+
+    # 타일 데이터셋 미리보기
+    preview_parser = subparsers.add_parser('view_tile', help='타일 데이터셋 미리보기')
+    preview_parser.add_argument('--image_dir', type=str, required=True, help='타일 데이터셋 디렉토리')
+    preview_parser.add_argument('--label_dir', type=str, required=True, help='타일 라벨 디렉토리')
+    preview_parser.add_argument('--out_file', type=str, required=True, help='갤러리 출력 이미지')
+    preview_parser.add_argument('--grid', type=int, nargs=2, default=[4, 4], help='그리드 가로 세로 사이즈 (예: --grid 4 4)')
     
     # 데이터셋 만들기
     synthetic_parser = subparsers.add_parser('synthetic', help='데이터셋 만들기')
@@ -1160,8 +1395,8 @@ def main():
     synthetic_skeletal_parser.add_argument('--num', type=int, default=5, help='이미지 생성 개수')
     synthetic_skeletal_parser.add_argument('--mask_type', type=str, default='polygon', help='마스크 타입 (line, polygon)')
 
-    # 데이터셋셋 슬라이스
-    slicing_image_parser = subparsers.add_parser('slice_image', help='데이터셋 슬라이스 만들기(큰이미지를 작게 쪼개기기)')
+    # 데이터셋 슬라이스
+    slicing_image_parser = subparsers.add_parser('slice_image', help='데이터셋 슬라이스 만들기(큰이미지를 작게 쪼개기)')
     slicing_image_parser.add_argument('--img_dir', type=str, required=True, help='이미지 디렉토리')
     slicing_image_parser.add_argument('--label_dir', type=str, required=True, help='라벨벨 디렉토리')
     slicing_image_parser.add_argument('--output_dir', type=str, required=True, help='출력 디렉토리')
@@ -1189,14 +1424,18 @@ def main():
         augment_dataset(args.dir, args.num, args.seed)
     elif args.command == 'preview':
         preview_dataset(args.dir, args.num, args.seed)
+    elif args.command == 'view_tile':
+        create_tile_gallery(args.image_dir, args.label_dir, args.out_file)
     elif args.command == 'synthetic':
         create_synthetic_drone_images(args.drone, args.back, args.output, args.num)
     elif args.command == 'synthetic_skeletal':
-        synthesize_advanced(args.drone, args.back_dir, args.output_dir, args.num, args.mask_type)
+        synthesize_advanced(args.drone, args.back_dir, args.output_dir, args.num, args.mask_type) # 일반 사각형 형태에 적용.
     elif args.command == 'synthetic_mountain':
-        synthesize_advanced_mountain_shape(args.drone, args.back_dir, args.output_dir, args.num, args.mask_type)
+        synthesize_advanced_mountain_shape(args.drone, args.back_dir, args.output_dir, args.num, args.mask_type) # 뾰족한 산모양의 경우 적용.
     elif args.command == 'slice_image':
-        batch_slice_yolo_polygon(args.img_dir, args.label_dir, args.output_dir, args.size, args.overlap)
+        # batch_slice_yolo_polygon(args.img_dir, args.label_dir, args.output_dir, args.size, args.overlap) # Box와 polygon 별도로 분리
+        # batch_slice_yolo_polygon_integrated(args.img_dir, args.label_dir, args.output_dir, args.size, args.overlap) # 모든 형식 polygon으로 통일
+        batch_slice_yolo_polygon_complete_only(args.img_dir, args.label_dir, args.output_dir, args.size, args.overlap) # 모든 객체가 타일안에 있는 경우만 저장
     elif args.command == 'delete':
         delete_files_with_suffix(args.dir, args.suffix)
     else:
@@ -1208,7 +1447,7 @@ if __name__ == "__main__":
 ########################################################
 ## command example
 ########################################################
-drone_path = './datasets/drone_data/signal/mini2_mini3_sig_1.png'    # 사용할 시그널 이미지 파일
+drone_path = './datasets/drone_data/signal/mini2_sig1_1.png'    # 사용할 시그널 이미지 파일 
 background_dir = './datasets/drone_data/background'     # 배경 이미지들이 들어있는 폴더 경로
 synthetic_output_dir = './datasets/synthetic' # 합성 이미지 저장될 경로
 img_dir = './datasets/synthetic/images'
@@ -1219,34 +1458,41 @@ sliced_label_dir = './datasets/synthetic/sliced_data/labels'
 final_output_dir = './datasets' # 최종 분할 데이터셋 저장될 경로
 
 ##############################################
+# # 슬라이스된 이미지+라벨 view
+##############################################
+# create_tile_gallery(sliced_img_dir, sliced_label_dir, './datasets/synthetic/sliced_data/tile_view.png', grid_size=(4, 4), thumb_size=(400, 400))
+
+##############################################
 # # 드론 이미지 합성 (박스 마스크 적용)
 ##############################################
 # # python prepare_data.py synthetic --drone ./datasets/drone_data/signal/autelevo_01_sig_2.png --back ./datasets/drone_data/background --output ./datasets/synthetic --num 100
 # create_synthetic_drone_images(drone_path, background_dir, synthetic_output_dir, num_images=50)
 
 ##############################################
-# # 드론 이미지 합성 (스케일럿 마스크 적용)
+# # 드론 이미지 합성 (스케일럿 마스크 적용) - 신호 패턴이 단순 사각형 모양일 경우 적용
 ##############################################
 # # python prepare_data.py synthetic_skeletal --drone ./datasets/drone_data/signal/signal_4.png --back_dir ./datasets/drone_data/background --output_dir ./datasets/synthetic --num 5 --mask_type line
-synthesize_advanced(drone_path, background_dir, synthetic_output_dir, num_gen=50, mask_type='polygon') # mask_type='line')
+# synthesize_advanced(drone_path, background_dir, synthetic_output_dir, num_gen=50, mask_type='polygon') # mask_type='line')
 
 ##############################################
 # # 드론 이미지 합성 (산모양 스케일럿 마스크 적용) - 신호 패턴이 쌍봉 모양일 경우 적용
 ##############################################
 # # python prepare_data.py synthetic_mountain --drone ./datasets/drone_data/signal/signal_4.png --back_dir ./datasets/drone_data/background --output_dir ./datasets/synthetic --num 5 --mask_type line
-# synthesize_advanced_mountain_shape(drone_path, background_dir, synthetic_output_dir, num_gen=2, mask_type='polygon')
+# synthesize_advanced_mountain_shape(drone_path, background_dir, synthetic_output_dir, num_gen=50, mask_type='polygon')
 
 ##############################################
 # # 합성 이미지 슬라이싱
 ##############################################
 # python prepare_data.py slice_image --img_dir ./datasets/drone_data/signal --label_dir ./datasets/drone_data/background --output_dir ./datasets/synthetic --size 2560 --overlap 0.3
-# batch_slice_yolo_polygon(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.3)
+# batch_slice_yolo_polygon(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.4) # Box와 polygon 별도로 분리
+# batch_slice_yolo_polygon_integrated(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.4) # 모든 형식 polygon으로 통일
+# batch_slice_yolo_polygon_complete_only(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.4) # 모든 객체가 타일안에 있는 경우만 저장
 
 ##############################################
 # # 원본 이미지 분할 (train, val, test)  
 # ############################################## 
 # # python prepare_data.py split --images ./datasets/synthetic --labels ./datasets/synthetic --output ./datasets --train 0.7 --val 0.2 --test 0.1
-# split_dataset(img_dir, label_dir, None, final_output_dir, train_ratio=0.7, val_ratio=0.2, test_ratio=0.1)
+# split_dataset(img_dir, label_dir, None, final_output_dir, train_ratio=0.8, val_ratio=0.2, test_ratio=0.0)
 
 ##############################################
 # # 슬라이싱 이미지 묶음 분할 (train, val, test)
