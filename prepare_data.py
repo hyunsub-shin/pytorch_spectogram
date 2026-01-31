@@ -90,6 +90,7 @@ def create_waveform_polygon(
 
     return poly
 
+# 모든 점 연결 형태의 라벨 출력(신호 패턴 변형됨) - 뾰족한 산모양
 def synthesize_advanced_mountain_shape(
     signal_path,
     bg_folder,
@@ -100,6 +101,7 @@ def synthesize_advanced_mountain_shape(
     signal_name = os.path.splitext(os.path.basename(signal_path))[0]
     class_id = extract_class_id(signal_name)
 
+    # 1. 저장 경로 설정
     save_dirs = {
         "images": os.path.join(output_root, "images"),
         "labels": os.path.join(output_root, "labels"),
@@ -117,48 +119,61 @@ def synthesize_advanced_mountain_shape(
         print("❌ 배경 이미지가 없습니다.")
         return
 
-    pattern_img = cv2.imread(signal_path)
+    # 2. 시그널 이미지 및 마스크 준비
+    # pattern_img = cv2.imread(signal_path)
+    pattern_img = cv2.imread(signal_path, cv2.IMREAD_UNCHANGED)
+
+    # 기존에 사용하시던 피크 탐지 및 마스크 생성 함수 호출
     binary_mask, peak_points = get_signal_peak_points(pattern_img)
 
     if not peak_points:
         print(f"❌ '{signal_name}'에서 peak를 찾지 못했습니다.")
         return
 
-    # ✅ 올바른 boundingRect 계산
+    # ✨ [적용 위치] 마스크 두께 조절 (Dilation)
+    # kernel 크기를 (3,3)에서 (5,5) 사이로 조정하여 두께를 결정하세요.
+    kernel = np.ones((7, 7), np.uint8) 
+    binary_mask = cv2.dilate(binary_mask, kernel, iterations=2)
+
+    # 시그널의 유효 영역 계산 (Bounding Rect)
     ys, xs = np.where(binary_mask > 0)
-    x, y, w, h = cv2.boundingRect(
-        np.column_stack((xs, ys)).astype(np.int32)
-    )
+    x_rect, y_rect, w_rect, h_rect = cv2.boundingRect(np.column_stack((xs, ys)).astype(np.int32))
 
-    crop_img = pattern_img[y:y+h, x:x+w]
-    crop_binary = binary_mask[y:y+h, x:x+w]
-    adjusted_peaks = [[p[0] - x, p[1] - y] for p in peak_points]
+    # 합성용 소스 추출
+    crop_img = pattern_img[y_rect:y_rect+h_rect, x_rect:x_rect+w_rect]
+    crop_mask = binary_mask[y_rect:y_rect+h_rect, x_rect:x_rect+w_rect]
+    adjusted_peaks = [[p[0] - x_rect, p[1] - y_rect] for p in peak_points]
 
-    print(f"🚀 '{signal_name}' (Class {class_id}) 합성 시작")
+    # ⭐ 색상 보존을 위한 알파 마스크 준비 (0.0 ~ 1.0)
+    alpha_mask = crop_mask.astype(float) / 255.0
+    alpha_3d = cv2.merge([alpha_mask, alpha_mask, alpha_mask])
 
-    for i in range(num_gen):
+    print(f"🚀 '{signal_name}' (Class {class_id}) 선명한 합성 시작")
+
+    for i in tqdm(range(num_gen)):
         bg = cv2.imread(random.choice(bg_list))
-        if bg is None:
-            continue
+        if bg is None: continue
 
         debug = bg.copy()
         bg_h, bg_w = bg.shape[:2]
 
-        if bg_w <= w or bg_h <= h:
-            continue
+        if bg_w <= w_rect or bg_h <= h_rect: continue
 
-        rx = random.randint(0, bg_w - w)
-        ry = random.randint(0, bg_h - h)
+        # 랜덤 합성 위치
+        rx = random.randint(0, bg_w - w_rect)
+        ry = random.randint(0, bg_h - h_rect)
 
-        roi = bg[ry:ry+h, rx:rx+w]
-        bg_part = cv2.bitwise_and(roi, roi, mask=cv2.bitwise_not(crop_binary))
-        fg_part = cv2.bitwise_and(crop_img, crop_img, mask=crop_binary)
-        bg[ry:ry+h, rx:rx+w] = cv2.add(bg_part, fg_part)
+        # 🛠️ [핵심 수정] 알파 블렌딩 합성 (색상 100% 보존)
+        roi = bg[ry:ry+h_rect, rx:rx+w_rect].astype(float)
+        fg = crop_img.astype(float)
+        
+        # 공식: (전경 * 마스크) + (배경 * (1 - 마스크))
+        blended = (fg * alpha_3d) + (roi * (1.0 - alpha_3d))
+        bg[ry:ry+h_rect, rx:rx+w_rect] = blended.astype(np.uint8)
 
-        # 폴리곤 생성
-        # 고정값 대신 약간의 랜덤 범위를 주면 증강(Augmentation) 효과가 납니다.
-        rand_peak = random.randint(45, 65)    # 산 높이에 변화
-        rand_valley = random.randint(10, 20)  # 골짜기 깊이에 변화
+        # 3. 폴리곤 생성 로직 (그대로 유지)
+        rand_peak = random.randint(60, 85)#(45, 65)#
+        rand_valley = random.randint(5, 15)#(10, 20)#
 
         final_poly = create_waveform_polygon(
             adjusted_peaks,
@@ -170,21 +185,15 @@ def synthesize_advanced_mountain_shape(
             valley_h=rand_valley
         )
 
+        # 4. 디버그 시각화 및 라벨 저장 (그대로 유지)
         poly_draw = final_poly.astype(np.int32).reshape((-1, 1, 2))
-
-        # 🔴 디버그 시각화
-        cv2.polylines(
-            debug,
-            [poly_draw],
-            True,
-            (0, 0, 255),
-            3,
-            cv2.LINE_AA
-        )
+        
+        # 디버그 이미지에 폴리곤 그리기
+        cv2.polylines(debug, [poly_draw], True, (0, 0, 255), 3, cv2.LINE_AA)
 
         for p in poly_draw:
             cv2.circle(debug, tuple(p[0]), 3, (255, 0, 0), -1)
-
+        
         cv2.putText(
             debug,
             f"ID:{class_id}",
@@ -195,10 +204,8 @@ def synthesize_advanced_mountain_shape(
             2
         )
 
-        # YOLO polygon label
-        poly_str = " ".join(
-            [f"{p[0]/bg_w:.6f} {p[1]/bg_h:.6f}" for p in final_poly]
-        )
+        # YOLO Polygon Label 문자열 생성
+        poly_str = " ".join([f"{p[0]/bg_w:.6f} {p[1]/bg_h:.6f}" for p in final_poly])
         label_line = f"{class_id} {poly_str}"
 
         name = f"{signal_name}_{i:04d}"
@@ -209,7 +216,212 @@ def synthesize_advanced_mountain_shape(
             f.write(label_line)
 
     print(f"✅ 완료: {output_root}")
-####################################################################################
+###################################################################################
+
+###################################################################################
+# 모든 점을 감싸는 가장 타이트한 볼록 다각형 생성
+###################################################################################
+# def synthesize_advanced_mountain_shape(signal_path, bg_folder, output_root, num_gen=10, k_size=3, iterations=1):
+def synthesize_advanced(signal_path, bg_folder, output_root, num_gen=10, k_size=3, iterations=1):
+    signal_basename = os.path.basename(signal_path)
+    signal_name = os.path.splitext(signal_basename)[0]
+    class_id = extract_class_id(signal_name)
+
+    save_dirs = {"images": os.path.join(output_root, "images"),
+                 "labels": os.path.join(output_root, "labels"),
+                 "debug": os.path.join(output_root, "debug")}
+    for p in save_dirs.values(): os.makedirs(p, exist_ok=True)
+
+    bg_list = [f for f in glob.glob(os.path.join(bg_folder, "*.*")) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+    
+    # 1. 원본 데이터 그대로 로드 (알파 채널 포함)
+    pattern_img = cv2.imread(signal_path, cv2.IMREAD_UNCHANGED)
+    if pattern_img is None: return
+
+    # 2. 정교한 마스크 생성 (신호가 끊기지 않도록 알파 채널 사용)
+    if pattern_img.shape[2] == 4:
+        alpha = pattern_img[:, :, 3]
+        _, binary_mask = cv2.threshold(alpha, 10, 255, cv2.THRESH_BINARY)
+    else:
+        gray = cv2.cvtColor(pattern_img, cv2.COLOR_BGR2GRAY)
+        _, binary_mask = cv2.threshold(gray, 15, 255, cv2.THRESH_BINARY)
+
+    # 두께 조절 (필요 시)
+    if k_size > 0:
+        kernel = np.ones((k_size, k_size), np.uint8)
+        binary_mask = cv2.dilate(binary_mask, kernel, iterations=iterations)
+
+    # 3. 신호 영역 크롭
+    coords = cv2.findNonZero(binary_mask)
+    if coords is None: return
+    x, y, w, h = cv2.boundingRect(coords)
+    crop_img = pattern_img[y:y+h, x:x+w].copy()
+    crop_binary = binary_mask[y:y+h, x:x+w].copy()
+
+    # 합성용 BGR 분리
+    pure_signal_bgr = crop_img[:, :, :3] if crop_img.shape[2] == 4 else crop_img
+
+    print(f"🚀 '{signal_name}' 합성 시작")
+
+    for i in tqdm(range(num_gen)):
+        bg = cv2.imread(random.choice(bg_list))
+        if bg is None: continue
+        bg_h, bg_w, _ = bg.shape
+
+        # 산형 배치를 위한 위치 결정 (원하는 로직으로 rx, ry 설정)
+        rx, ry = random.randint(0, bg_w - w), random.randint(0, bg_h - h)
+        roi = bg[ry:ry+h, rx:rx+w]
+
+        # [원본 보존 합성] 픽셀 직접 대입
+        cv2.copyTo(pure_signal_bgr, crop_binary, roi)
+
+        # 4. [핵심] 분리된 패턴을 하나로 잇는 타이트한 폴리곤 라벨 생성
+        contours, _ = cv2.findContours(crop_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        all_points = []
+        for cnt in contours:
+            for pt in cnt:
+                # 배경 기준 좌표로 변환
+                all_points.append([pt[0][0] + rx, pt[0][1] + ry])
+        
+        yolo_labels = []
+        if all_points:
+            all_points = np.array(all_points)
+            # Convex Hull: 모든 점을 감싸는 가장 타이트한 볼록 다각형 생성
+            hull = cv2.convexHull(all_points)
+            
+            # 폴리곤 좌표 정규화 (0~1)
+            polygon_coords = []
+            for p in hull:
+                polygon_coords.append(f"{p[0][0]/bg_w:.6f} {p[0][1]/bg_h:.6f}")
+            
+            yolo_labels.append(f"{class_id} {' '.join(polygon_coords)}")
+
+            # 디버깅용 시각화 (폴리곤 선 그리기)
+            debug = bg.copy()
+            cv2.drawContours(debug, [hull], -1, (0, 255, 0), 2)
+
+            cv2.putText(
+                debug,
+                f"ID:{class_id}",
+                (hull[0][0][0], max(0, hull[0][0][1] - 10)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 0, 255),
+                2
+            )
+
+        # 저장
+        save_name = f"{signal_name}_{i:04d}"
+        cv2.imwrite(os.path.join(save_dirs["images"], f"{save_name}.png"), bg)
+        cv2.imwrite(os.path.join(save_dirs["debug"], f"{save_name}_debug.png"), debug)
+        with open(os.path.join(save_dirs["labels"], f"{save_name}.txt"), 'w') as f:
+            f.write('\n'.join(yolo_labels))
+
+    print(f"✅ 완료: {output_root}")
+
+# def synthesize_advanced_mountain_shape(signal_path, bg_folder, output_root, num_gen=10, k_size=3, iterations=1):
+def synthesize_advanced_folder(signal_folder, bg_folder, output_root, num_gen=10, k_size=3, iterations=1):
+    # 신호 폴더 내 이미지 파일들 가져오기
+    signal_list = [f for f in glob.glob(os.path.join(signal_folder, "*.*")) 
+                   if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+    
+    bg_list = [f for f in glob.glob(os.path.join(bg_folder, "*.*")) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+
+    save_dirs = {"images": os.path.join(output_root, "images"),
+                 "labels": os.path.join(output_root, "labels"),
+                 "debug": os.path.join(output_root, "debug")}
+    for p in save_dirs.values(): os.makedirs(p, exist_ok=True)
+
+    # 신호 파일 하나씩 순회
+    for signal_path in signal_list:
+        signal_basename = os.path.basename(signal_path)
+        signal_name = os.path.splitext(signal_basename)[0]
+        class_id = extract_class_id(signal_name)
+
+        # 1. 원본 데이터 로드
+        pattern_img = cv2.imread(signal_path, cv2.IMREAD_UNCHANGED)
+        if pattern_img is None: continue
+
+        # 2. 마스크 생성
+        if pattern_img.shape[2] == 4:
+            alpha = pattern_img[:, :, 3]
+            _, binary_mask = cv2.threshold(alpha, 10, 255, cv2.THRESH_BINARY)
+        else:
+            gray = cv2.cvtColor(pattern_img, cv2.COLOR_BGR2GRAY)
+            _, binary_mask = cv2.threshold(gray, 15, 255, cv2.THRESH_BINARY)
+
+        if k_size > 0:
+            kernel = np.ones((k_size, k_size), np.uint8)
+            binary_mask = cv2.dilate(binary_mask, kernel, iterations=iterations)
+
+        # 3. 신호 영역 크롭
+        coords = cv2.findNonZero(binary_mask)
+        if coords is None: continue
+        x, y, w, h = cv2.boundingRect(coords)
+        crop_img = pattern_img[y:y+h, x:x+w].copy()
+        crop_binary = binary_mask[y:y+h, x:x+w].copy()
+        pure_signal_bgr = crop_img[:, :, :3] if crop_img.shape[2] == 4 else crop_img
+
+        print(f"🚀 '{signal_name}' 합성 시작")
+
+        # 각 신호마다 num_gen 횟수만큼 반복
+        for i in tqdm(range(num_gen)):
+            bg = cv2.imread(random.choice(bg_list))
+            if bg is None: continue
+            bg_h, bg_w, _ = bg.shape
+
+            rx, ry = random.randint(0, bg_w - w), random.randint(0, bg_h - h)
+            roi = bg[ry:ry+h, rx:rx+w]
+
+            cv2.copyTo(pure_signal_bgr, crop_binary, roi)
+
+            # 4. 폴리곤 라벨 생성 (기존 로직 유지)
+            contours, _ = cv2.findContours(crop_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            all_points = []
+            for cnt in contours:
+                for pt in cnt:
+                    all_points.append([pt[0][0] + rx, pt[0][1] + ry])
+            
+            yolo_labels = []
+            if all_points:
+                all_points = np.array(all_points)
+                hull = cv2.convexHull(all_points)
+                
+                polygon_coords = []
+                for p in hull:
+                    polygon_coords.append(f"{p[0][0]/bg_w:.6f} {p[0][1]/bg_h:.6f}")
+                
+                yolo_labels.append(f"{class_id} {' '.join(polygon_coords)}")
+
+                debug = bg.copy()
+                cv2.drawContours(debug, [hull], -1, (0, 255, 0), 2)
+                cv2.putText(debug, f"ID:{class_id}", (hull[0][0][0], max(0, hull[0][0][1] - 10)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
+            # 저장
+            save_name = f"{signal_name}_{i:04d}"
+            cv2.imwrite(os.path.join(save_dirs["images"], f"{save_name}.png"), bg)
+            cv2.imwrite(os.path.join(save_dirs["debug"], f"{save_name}_debug.png"), debug)
+            with open(os.path.join(save_dirs["labels"], f"{save_name}.txt"), 'w') as f:
+                f.write('\n'.join(yolo_labels))
+
+    print(f"✅ 모든 폴더 내 파일 처리 완료")
+###################################################################################
+
+def extract_class_id(filename):
+    """파일명에서 마지막 숫자를 찾아 class ID로 반환 (숫자가 없으면 0)"""
+    numbers = re.findall(r'\d+', filename)
+    if numbers:
+        # 마지막 숫자를 사용하여 class id 결정 (signal_1 -> class 0, signal_2 -> class 1)
+        if (int(numbers[-1]) - 1) < 0:
+            return 0
+        else:
+            return int(numbers[-1]) - 1 # 가장 마지막에 등장하는 숫자 반환
+    else:
+        print(f"경고: 파일명에서 숫자를 찾을 수 없어 클래스 0을 사용합니다: {filename}")        
+        return 0
 
 def get_signal_skeleton_mask_line(img, thickness=2):
     """점들의 중심을 찾아 순서대로 선으로 연결한 골격 마스크 생성"""
@@ -247,127 +459,254 @@ def get_signal_skeleton_mask_line(img, thickness=2):
 
     return binary_mask, skeleton
 
-def get_signal_skeleton_mask_polygon(img):
-    """점들을 연결하여 시그널의 '모양'을 가진 마스크 생성"""
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    lower_yellow = np.array([10, 50, 50]) 
-    upper_yellow = np.array([40, 255, 255])
-    binary_mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
+# ############################################
+# # 드론 이미지 합성시 신호 일부 소실됨
+# ############################################
+# def get_signal_skeleton_mask_polygon(img):
+#     """점들을 연결하여 시그널의 '모양'을 가진 마스크 생성"""
+#     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+#     lower_yellow = np.array([10, 50, 50]) 
+#     upper_yellow = np.array([40, 255, 255])
+#     binary_mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
 
-    skeleton = np.zeros_like(binary_mask)
-    contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+#     skeleton = np.zeros_like(binary_mask)
+#     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    if not contours:
-        return binary_mask, binary_mask
+#     if not contours:
+#         return binary_mask, binary_mask
 
-    all_points = np.vstack(contours)
-    hull = cv2.convexHull(all_points)
-    cv2.drawContours(skeleton, [hull], -1, 255, thickness=-1) 
+#     all_points = np.vstack(contours)
+#     hull = cv2.convexHull(all_points)
+#     cv2.drawContours(skeleton, [hull], -1, 255, thickness=-1) 
 
-    return binary_mask, skeleton
+#     return binary_mask, skeleton
 
-def extract_class_id(filename):
-    """파일명에서 마지막 숫자를 찾아 class ID로 반환 (숫자가 없으면 0)"""
-    numbers = re.findall(r'\d+', filename)
-    if numbers:
-        # 마지막 숫자를 사용하여 class id 결정 (signal_1 -> class 0, signal_2 -> class 1)
-        if (int(numbers[-1]) - 1) < 0:
-            return 0
-        else:
-            return int(numbers[-1]) - 1 # 가장 마지막에 등장하는 숫자 반환
-    else:
-        print(f"경고: 파일명에서 숫자를 찾을 수 없어 클래스 0을 사용합니다: {filename}")        
-        return 0
-
-def synthesize_advanced(signal_path, bg_folder, output_root, num_gen=10, mask_type='polygon'):
-    # 1. 파일 이름 설정 및 class ID 추출
-    signal_basename = os.path.basename(signal_path)
-    signal_name = os.path.splitext(signal_basename)[0]
-    class_id = extract_class_id(signal_name)
+# def synthesize_advanced(signal_path, bg_folder, output_root, num_gen=10, mask_type='polygon'):
+#     # 1. 파일 이름 설정 및 class ID 추출
+#     signal_basename = os.path.basename(signal_path)
+#     signal_name = os.path.splitext(signal_basename)[0]
+#     class_id = extract_class_id(signal_name)
     
-    save_dirs = {
-        "images": os.path.join(output_root, "images"),
-        "labels": os.path.join(output_root, "labels"),
-        "debug": os.path.join(output_root, "debug")
-    }
-    for p in save_dirs.values():
-        os.makedirs(p, exist_ok=True)
+#     save_dirs = {
+#         "images": os.path.join(output_root, "images"),
+#         "labels": os.path.join(output_root, "labels"),
+#         "debug": os.path.join(output_root, "debug")
+#     }
+#     for p in save_dirs.values():
+#         os.makedirs(p, exist_ok=True)
 
-    bg_list = glob.glob(os.path.join(bg_folder, "*.*"))
-    bg_list = [f for f in bg_list if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp'))]
+#     bg_list = glob.glob(os.path.join(bg_folder, "*.*"))
+#     bg_list = [f for f in bg_list if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp'))]
     
-    if not bg_list:
-        print("❌ 배경 폴더에 이미지가 없습니다.")
-        return
+#     if not bg_list:
+#         print("❌ 배경 폴더에 이미지가 없습니다.")
+#         return
 
-    pattern_img = cv2.imread(signal_path)
-    if mask_type == 'line':
-        binary_mask, skeleton_mask = get_signal_skeleton_mask_line(pattern_img)
-    elif mask_type == 'polygon':
-        binary_mask, skeleton_mask = get_signal_skeleton_mask_polygon(pattern_img)
-    else:
-        print("❌ 올바른 마스크 타입이 아닙니다.")
-        return
+#     pattern_img = cv2.imread(signal_path)
+#     if mask_type == 'line':
+#         binary_mask, skeleton_mask = get_signal_skeleton_mask_line(pattern_img)
+#     elif mask_type == 'polygon':
+#         binary_mask, skeleton_mask = get_signal_skeleton_mask_polygon(pattern_img)
+#     else:
+#         print("❌ 올바른 마스크 타입이 아닙니다.")
+#         return
 
-    coords = cv2.findNonZero(binary_mask)
-    if coords is None:
-        print("❌ 시그널 패턴을 찾을 수 없습니다.")
-        return
+#     coords = cv2.findNonZero(binary_mask)
+#     if coords is None:
+#         print("❌ 시그널 패턴을 찾을 수 없습니다.")
+#         return
         
-    x, y, w, h = cv2.boundingRect(coords)
-    crop_img = pattern_img[y:y+h, x:x+w]
-    crop_binary = binary_mask[y:y+h, x:x+w]
-    crop_skeleton = skeleton_mask[y:y+h, x:x+w]
+#     x, y, w, h = cv2.boundingRect(coords)
+#     crop_img = pattern_img[y:y+h, x:x+w]
+#     crop_binary = binary_mask[y:y+h, x:x+w]
+#     crop_skeleton = skeleton_mask[y:y+h, x:x+w]
 
-    print(f"🚀 '{signal_name}' (Class ID: {class_id}) 패턴으로 {num_gen}개 생성 시작")
+#     print(f"🚀 '{signal_name}' (Class ID: {class_id}) 패턴으로 {num_gen}개 생성 시작")
 
-    for i in range(num_gen):
-        bg_path = random.choice(bg_list)
-        bg_img_origin = cv2.imread(bg_path)
+#     for i in tqdm(range(num_gen)):
+#         bg_path = random.choice(bg_list)
+#         bg_img_origin = cv2.imread(bg_path)
         
-        bg = bg_img_origin.copy()
-        debug = bg_img_origin.copy()
-        bg_h, bg_w, _ = bg.shape
+#         bg = bg_img_origin.copy()
+#         debug = bg_img_origin.copy()
+#         bg_h, bg_w, _ = bg.shape
 
-        if bg_w <= w or bg_h <= h:
-            continue
+#         if bg_w <= w or bg_h <= h:
+#             continue
 
-        rx = random.randint(0, bg_w - w)
-        ry = random.randint(0, bg_h - h)
+#         rx = random.randint(0, bg_w - w)
+#         ry = random.randint(0, bg_h - h)
 
-        # 이미지 합성
-        roi = bg[ry:ry+h, rx:rx+w]
-        bg_part = cv2.bitwise_and(roi, roi, mask=cv2.bitwise_not(crop_binary))
-        fg_part = cv2.bitwise_and(crop_img, crop_img, mask=crop_binary)
-        bg[ry:ry+h, rx:rx+w] = cv2.add(bg_part, fg_part)
+#         # 이미지 합성
+#         roi = bg[ry:ry+h, rx:rx+w]
+#         bg_part = cv2.bitwise_and(roi, roi, mask=cv2.bitwise_not(crop_binary))
+#         fg_part = cv2.bitwise_and(crop_img, crop_img, mask=crop_binary)
+#         bg[ry:ry+h, rx:rx+w] = cv2.add(bg_part, fg_part)
 
-        # 라벨 생성
-        contours, _ = cv2.findContours(crop_skeleton, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+#         # 라벨 생성
+#         contours, _ = cv2.findContours(crop_skeleton, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        yolo_labels = []
-        for cnt in contours:
-            abs_cnt = cnt.copy()
-            abs_cnt[:, 0, 0] += rx
-            abs_cnt[:, 0, 1] += ry
+#         yolo_labels = []
+#         for cnt in contours:
+#             abs_cnt = cnt.copy()
+#             abs_cnt[:, 0, 0] += rx
+#             abs_cnt[:, 0, 1] += ry
             
-            # 디버깅 이미지에 class ID 텍스트 추가
-            cv2.drawContours(debug, [abs_cnt], -1, (0, 255, 0), 2)
-            cv2.putText(debug, f"ID: {class_id}", (rx, ry-10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+#             # 디버깅 이미지에 class ID 텍스트 추가
+#             cv2.drawContours(debug, [abs_cnt], -1, (0, 255, 0), 2)
+#             cv2.putText(debug, f"ID: {class_id}", (rx, ry-10), 
+#                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-            polygon = []
-            for p in abs_cnt:
-                polygon.append(f"{p[0][0]/bg_w:.6f} {p[0][1]/bg_h:.6f}")
-            # 첫 번째 인자에 추출한 class_id 적용
-            yolo_labels.append(f"{class_id} {' '.join(polygon)}")
+#             polygon = []
+#             for p in abs_cnt:
+#                 polygon.append(f"{p[0][0]/bg_w:.6f} {p[0][1]/bg_h:.6f}")
+#             # 첫 번째 인자에 추출한 class_id 적용
+#             yolo_labels.append(f"{class_id} {' '.join(polygon)}")
 
-        save_name = f"{signal_name}_{i:04d}"
-        cv2.imwrite(os.path.join(save_dirs["images"], f"{save_name}.png"), bg)
-        cv2.imwrite(os.path.join(save_dirs["debug"], f"{save_name}_debug.png"), debug)
-        with open(os.path.join(save_dirs["labels"], f"{save_name}.txt"), 'w') as f:
-            f.write('\n'.join(yolo_labels))
+#         save_name = f"{signal_name}_{i:04d}"
+#         cv2.imwrite(os.path.join(save_dirs["images"], f"{save_name}.png"), bg)
+#         cv2.imwrite(os.path.join(save_dirs["debug"], f"{save_name}_debug.png"), debug)
+#         with open(os.path.join(save_dirs["labels"], f"{save_name}.txt"), 'w') as f:
+#             f.write('\n'.join(yolo_labels))
 
-    print(f"✅ 완료: {output_root}")
+#     print(f"✅ 완료: {output_root}")
+# ####################################################
+
+# ####################################################
+# # 드론 이미지 손실없이 합성
+# ####################################################
+# def get_signal_skeleton_mask_polygon(pattern_img, k_size, iterations):
+#     """알파 채널 기반 마스크 생성 및 두께 조절"""
+#     # 1. 4채널(RGBA)인 경우 알파 채널(투명도) 추출
+#     if pattern_img.shape[2] == 4:
+#         alpha = pattern_img[:, :, 3]
+#         _, binary = cv2.threshold(alpha, 1, 255, cv2.THRESH_BINARY)
+#     else:
+#         # 3채널인 경우 밝기 기준 이진화
+#         gray = cv2.cvtColor(pattern_img, cv2.COLOR_BGR2GRAY)
+#         _, binary = cv2.threshold(gray, 10, 255, cv2.THRESH_BINARY)
+    
+#     # 2. 커널 생성 및 두께 확장 (Dilation)
+#     if k_size > 0:
+#         kernel = np.ones((k_size, k_size), np.uint8)
+#         binary = cv2.dilate(binary, kernel, iterations=iterations)
+    
+#     return binary, binary
+
+# def synthesize_advanced(signal_path, bg_folder, output_root, num_gen=10, mask_type='polygon', k_size=1, iterations=1):
+#     # 1. 파일 이름 설정 및 class ID 추출
+#     signal_basename = os.path.basename(signal_path)
+#     signal_name = os.path.splitext(signal_basename)[0]
+#     class_id = extract_class_id(signal_name)
+    
+#     save_dirs = {
+#         "images": os.path.join(output_root, "images"),
+#         "labels": os.path.join(output_root, "labels"),
+#         "debug": os.path.join(output_root, "debug")
+#     }
+#     for p in save_dirs.values():
+#         os.makedirs(p, exist_ok=True)
+
+#     bg_list = glob.glob(os.path.join(bg_folder, "*.*"))
+#     bg_list = [f for f in bg_list if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp'))]
+    
+#     if not bg_list:
+#         print("❌ 배경 폴더에 이미지가 없습니다.")
+#         return
+
+#     # [핵심] 알파 채널까지 읽기 위해 IMREAD_UNCHANGED 사용
+#     pattern_img = cv2.imread(signal_path, cv2.IMREAD_UNCHANGED)
+#     if pattern_img is None: return
+
+#     # 마스크 생성 (두께 조절 포함)
+#     if mask_type == 'polygon':
+#         binary_mask, skeleton_mask = get_signal_skeleton_mask_polygon(pattern_img, k_size, iterations)
+#     else:
+#         # line 타입도 필요시 동일하게 k_size 전달 구조로 수정 필요
+#         binary_mask, skeleton_mask = get_signal_skeleton_mask_line(pattern_img) #, k_size, iterations)
+
+#     coords = cv2.findNonZero(binary_mask)
+#     if coords is None:
+#         print("❌ 시그널 패턴을 찾을 수 없습니다.")
+#         return
+        
+#     x, y, w, h = cv2.boundingRect(coords)
+    
+#     # 원본 데이터 보존을 위한 크롭
+#     crop_img = pattern_img[y:y+h, x:x+w].copy()
+#     crop_binary = binary_mask[y:y+h, x:x+w].copy()
+#     crop_skeleton = skeleton_mask[y:y+h, x:x+w].copy()
+
+#     # 4채널일 경우 합성을 위해 BGR만 분리
+#     if crop_img.shape[2] == 4:
+#         pure_signal_bgr = crop_img[:, :, :3]
+#     else:
+#         pure_signal_bgr = crop_img
+
+#     print(f"🚀 '{signal_name}' (Class ID: {class_id}) 패턴으로 {num_gen}개 생성 시작")
+
+#     for i in tqdm(range(num_gen)):
+#         bg_path = random.choice(bg_list)
+#         bg = cv2.imread(bg_path)
+#         if bg is None: continue
+        
+#         debug = bg.copy()
+#         bg_h, bg_w, _ = bg.shape
+
+#         if bg_w <= w or bg_h <= h:
+#             continue
+
+#         rx = random.randint(0, bg_w - w)
+#         ry = random.randint(0, bg_h - h)
+
+#         # [핵심] 원본 픽셀 보존 합성: Direct Pixel Mapping
+#         roi = bg[ry:ry+h, rx:rx+w]
+#         # 마스크가 255인 영역만 배경 위에 원본 신호 픽셀을 그대로 덮어씀
+#         roi[crop_binary == 255] = pure_signal_bgr[crop_binary == 255]
+
+#         # --- 라벨 생성 부분 (하나의 통합 폴리곤으로 수정) ---
+#         # 1. 모든 컨투어 점들을 하나의 리스트로 통합
+#         all_points = []
+#         contours, _ = cv2.findContours(crop_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+#         for cnt in contours:
+#             for p in cnt:
+#                 # 좌표를 배경 이미지 기준(rx, ry 합산)으로 변환하여 추가
+#                 all_points.append([p[0][0] + rx, p[0][1] + ry])
+        
+#         yolo_labels = []
+#         if all_points:
+#             all_points = np.array(all_points)
+            
+#             # 2. 모든 점을 감싸는 최소 크기의 사각형(Bounding Box) 좌표 구하기
+#             x_min, y_min = np.min(all_points[:, 0]), np.min(all_points[:, 1])
+#             x_max, y_max = np.max(all_points[:, 0]), np.max(all_points[:, 1])
+            
+#             # 3. 사각형의 네 꼭짓점을 폴리곤 형태로 구성 (좌상, 좌하, 우하, 우상 순서)
+#             # YOLO 폴리곤 포맷에 맞게 0~1 사이로 정규화
+#             single_polygon = [
+#                 f"{x_min/bg_w:.6f} {y_min/bg_h:.6f}", # 좌상
+#                 f"{x_min/bg_w:.6f} {y_max/bg_h:.6f}", # 좌하
+#                 f"{x_max/bg_w:.6f} {y_max/bg_h:.6f}", # 우하
+#                 f"{x_max/bg_w:.6f} {y_min/bg_h:.6f}"  # 우상
+#             ]
+            
+#             # 하나의 라벨로 결합
+#             yolo_labels.append(f"{class_id} {' '.join(single_polygon)}")
+
+#             # (옵션) 디버깅용 시각화: 사각형 그리기
+#             cv2.rectangle(debug, (int(x_min), int(y_min)), (int(x_max), int(y_max)), (0, 255, 0), 2)
+#             cv2.putText(debug, f"ID: {class_id}", (rx, ry-10), 
+#                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+#         save_name = f"{signal_name}_{i:04d}"
+#         cv2.imwrite(os.path.join(save_dirs["images"], f"{save_name}.png"), bg)
+#         cv2.imwrite(os.path.join(save_dirs["debug"], f"{save_name}_debug.png"), debug)
+#         with open(os.path.join(save_dirs["labels"], f"{save_name}.txt"), 'w') as f:
+#             f.write('\n'.join(yolo_labels))
+
+#     print(f"✅ 완료: {output_root}")
+# ####################################################
 
 def delete_files_with_suffix(directory, suffix):
     """
@@ -428,8 +767,8 @@ def split_dataset(images_dir, labels_dir, masks_dir, output_dir, train_ratio=0.7
     """
     # YOLO 형식 디렉토리 구조 생성
     for split in ['train', 'val', 'test']:
-        os.makedirs(os.path.join(output_dir, 'images', split), exist_ok=True)
-        os.makedirs(os.path.join(output_dir, 'labels', split), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, 'images', split, 'resized_images'), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, 'labels', split, 'resized_images'), exist_ok=True)
         if masks_dir:
             os.makedirs(os.path.join(output_dir, 'masks', split), exist_ok=True)
     
@@ -459,13 +798,13 @@ def split_dataset(images_dir, labels_dir, masks_dir, output_dir, train_ratio=0.7
         for file in tqdm(files):
             # 이미지 파일 복사
             src_image = os.path.join(images_dir, file)
-            dst_image = os.path.join(output_dir, 'images', split, file)
+            dst_image = os.path.join(output_dir, 'images', split, 'resized_images', file)
             shutil.copy2(src_image, dst_image)
             
             # 라벨 파일 복사 (있는 경우)
             base_name = os.path.splitext(file)[0]
             src_label = os.path.join(labels_dir, f"{base_name}.txt")
-            dst_label = os.path.join(output_dir, 'labels', split, f"{base_name}.txt")
+            dst_label = os.path.join(output_dir, 'labels', split, 'resized_images', f"{base_name}.txt")
             if os.path.exists(src_label):
                 shutil.copy2(src_label, dst_label)
             
@@ -523,8 +862,8 @@ def split_sliced_dataset(image_dir, label_dir, output_base_dir, train_ratio=0.7,
     # 5. 파일 복사 및 폴더 정리
     for split_name, orig_list in split_map.items():
         # 사용자 요청 구조: output_base_dir/images/train... 및 output_base_dir/labels/train...
-        target_img_dir = os.path.join(output_base_dir, 'images', split_name)
-        target_lbl_dir = os.path.join(output_base_dir, 'labels', split_name)
+        target_img_dir = os.path.join(output_base_dir, 'images', split_name, 'sliced_images')
+        target_lbl_dir = os.path.join(output_base_dir, 'labels', split_name, 'sliced_images')
         
         os.makedirs(target_img_dir, exist_ok=True)
         os.makedirs(target_lbl_dir, exist_ok=True)
@@ -546,8 +885,8 @@ def split_sliced_dataset(image_dir, label_dir, output_base_dir, train_ratio=0.7,
 
     print(f"\n✅ 분할 완료!")
     print(f"📂 구조 확인:")
-    print(f"   - {output_base_dir}/images/{{train, val, test}}")
-    print(f"   - {output_base_dir}/labels/{{train, val, test}}")
+    print(f"   - {output_base_dir}/images/{{train, val, test}}/sliced_images")
+    print(f"   - {output_base_dir}/labels/{{train, val, test}}/sliced_images")
 
 def create_mask_from_bbox(image_path, label_path, output_path, dilation_size=5):
     """
@@ -738,7 +1077,7 @@ def augment_dataset(dataset_dir, num_augmentations=5, random_seed=42):
     
     print("데이터 증강 완료!")
 
-def preview_dataset(dataset_dir, num_samples=5, random_seed=42):
+def preview_dataset(image_dir, label_dir, num_samples=5, random_seed=42):
     """
     데이터셋 미리보기 (이미지, 바운딩 박스, 마스크 시각화)
     
@@ -753,7 +1092,7 @@ def preview_dataset(dataset_dir, num_samples=5, random_seed=42):
     
     # 이미지 파일 목록 가져오기
     image_extensions = ['.jpg', '.jpeg', '.png', '.bmp']
-    image_files = [f for f in os.listdir(dataset_dir) 
+    image_files = [f for f in os.listdir(image_dir) 
                    if any(f.lower().endswith(ext) for ext in image_extensions) 
                    and '_mask' not in f]
     
@@ -763,10 +1102,10 @@ def preview_dataset(dataset_dir, num_samples=5, random_seed=42):
     
     for file in image_files:
         # 파일 경로
-        image_path = os.path.join(dataset_dir, file)
+        image_path = os.path.join(image_dir, file)
         base_name = os.path.splitext(file)[0]
-        label_path = os.path.join(dataset_dir, f"{base_name}.txt")
-        mask_path = os.path.join(dataset_dir, f"{base_name}_mask.png")
+        label_path = os.path.join(label_dir, f"{base_name}.txt")
+        mask_path = os.path.join(image_dir, f"{base_name}_mask.png")
         
         # 이미지 로드
         image = cv2.imread(image_path)
@@ -832,167 +1171,261 @@ def preview_dataset(dataset_dir, num_samples=5, random_seed=42):
         plt.tight_layout()
         plt.show()
 
-def create_synthetic_drone_images(drone_model_path, background_dir, output_dir, num_images=100):
-    """드론 모델을 다양한 배경에 합성하여 이미지 생성"""
+# def create_synthetic_drone_images(drone_model_path, background_dir, output_dir, num_images=100):
+#     """드론 모델을 다양한 배경에 합성하여 이미지 생성"""
     
-    # 드론 시그널 파일명에서 클래스 ID 추출 및 파일명 기반 이름 생성
-    # 예: signal_1.png -> 클래스 0, signal_2.png -> 클래스 1
+#     # 드론 시그널 파일명에서 클래스 ID 추출 및 파일명 기반 이름 생성
+#     # 예: signal_1.png -> 클래스 0, signal_2.png -> 클래스 1
+#     drone_filename = os.path.basename(drone_model_path)
+#     # 확장자 제거하여 기본 파일명 추출
+#     drone_base_name = os.path.splitext(drone_filename)[0]
+    
+#     # 파일명에서 숫자 추출
+#     numbers = re.findall(r'\d+', drone_filename)
+#     if numbers:
+#         # 마지막 숫자를 사용하여 클래스 ID 결정 (signal_1 -> 클래스 0, signal_2 -> 클래스 1)
+#         class_id = int(numbers[-1]) - 1
+#         if class_id < 0:
+#             class_id = 0
+#     else:
+#         # 숫자가 없으면 기본값 0 사용
+#         class_id = 0
+#         print(f"경고: 파일명에서 숫자를 찾을 수 없어 클래스 0을 사용합니다: {drone_filename}")
+    
+#     print(f"드론 시그널: {drone_filename} -> 클래스 ID: {class_id}, 기본 파일명: {drone_base_name}")
+    
+#     # 드론 모델 이미지 로드 (알파 채널 포함)
+#     drone = cv2.imread(drone_model_path, cv2.IMREAD_UNCHANGED)
+    
+#     # 드론 이미지 디버깅
+#     if drone is None:
+#         print(f"오류: 드론 이미지를 로드할 수 없습니다: {drone_model_path}")
+#         return
+    
+#     print(f"드론 이미지 정보: 크기={drone.shape}, 타입={drone.dtype}")
+    
+#     # 드론 이미지에 알파 채널이 없으면 추가
+#     if len(drone.shape) == 2:  # 그레이스케일 이미지
+#         drone = cv2.cvtColor(drone, cv2.COLOR_GRAY2BGRA)
+#         drone[:, :, 3] = 255  # 완전 불투명 설정
+#     elif drone.shape[2] == 3:  # BGR 이미지, 알파 채널 없음
+#         b, g, r = cv2.split(drone)
+#         alpha = np.ones(b.shape, dtype=b.dtype) * 255
+#         drone = cv2.merge((b, g, r, alpha))
+    
+#     # 배경 이미지 목록
+#     backgrounds = [os.path.join(background_dir, f) for f in os.listdir(background_dir)
+#                   if f.lower().endswith(('.jpg', '.png', '.jpeg'))]
+    
+#     if not backgrounds:
+#         print(f"오류: 배경 이미지를 찾을 수 없습니다: {background_dir}")
+#         return
+    
+#     os.makedirs(output_dir, exist_ok=True)
+    
+#     for i in range(num_images):
+#         # 랜덤 배경 선택
+#         bg_path = random.choice(backgrounds)
+#         background = cv2.imread(bg_path)
+        
+#         if background is None:
+#             print(f"오류: 배경 이미지를 로드할 수 없습니다: {bg_path}")
+#             continue
+        
+#         # 배경 크기 조정
+#         bg_h, bg_w = background.shape[:2]
+#         print(f"배경 크기: {bg_w}x{bg_h}")
+        
+#         # 드론 크기 및 위치 랜덤화
+#         # 원본 드론 크기
+#         drone_orig_h, drone_orig_w = drone.shape[:2]
+#         print(f"드론 원본 크기: {drone_orig_w}x{drone_orig_h}")
+        
+#         # 드론이 배경보다 크면 배경에 맞게 크기 조정 (이 경우만 크기 조정)
+#         if drone_orig_w > bg_w or drone_orig_h > bg_h:
+#             max_width = int(bg_w)  # 배경의 90%로 제한
+#             max_height = int(bg_h)  # 배경의 90%로 제한
+            
+#             # 비율 유지하며 크기 조정
+#             width_ratio = max_width / drone_orig_w
+#             height_ratio = max_height / drone_orig_h
+#             scale_factor = min(width_ratio, height_ratio)
+            
+#             print(f"드론 이미지가 배경보다 큽니다. 스케일 팩터 {scale_factor}로 조정합니다.")
+#             scale = scale_factor
+#         else:
+#             # 원본 크기 그대로 사용
+#             scale = 1.0  # 원본 크기 유지
+            
+#         print(f"적용된 스케일: {scale}, 드론 원본 크기: {drone_orig_w}x{drone_orig_h}")
+#         drone_resized = cv2.resize(drone, (0, 0), fx=scale, fy=scale)
+        
+#         # 드론 회전 적용 제외
+#         drone_h, drone_w = drone_resized.shape[:2]
+#         print(f"크기 조정 후 드론 크기: {drone_w}x{drone_h}, 배경 크기: {bg_w}x{bg_h}")
+        
+#         # 회전 없이 그대로 사용
+#         drone_rotated = drone_resized
+        
+#         # 드론 위치 선택 (화면 중앙에 가깝게)
+#         # 배경 이미지에서 드론이 들어갈 수 있는 최대 범위 계산
+#         max_x = max(1, bg_w - drone_w)
+#         max_y = max(1, bg_h - drone_h)
+        
+#         # 가능한 범위 내에서 중앙 근처에 배치
+#         x_left = max(0, min(bg_w//4, max_x//4))
+#         x_right = max(x_left + 1, min(bg_w*3//4, max_x))
+#         y_top = max(0, min(bg_h//4, max_y//4))
+#         y_bottom = max(y_top + 1, min(bg_h*3//4, max_y))
+        
+#         x_pos = random.randint(x_left, x_right)
+#         y_pos = random.randint(y_top, y_bottom)
+#         # y_pos = (0)
+        
+#         print(f"드론 위치: ({x_pos}, {(y_pos)})")
+        
+#         # 합성할 배경 영역 준비
+#         roi = background[y_pos:y_pos+drone_h, x_pos:x_pos+drone_w]
+        
+#         # 알파 블렌딩으로 이미지 합성
+#         try:
+#             if drone_rotated.shape[2] == 4:  # 알파 채널 존재
+#                 # 알파 마스크 추출
+#                 alpha_mask = drone_rotated[:, :, 3] / 255.0
+#                 alpha_mask_3d = np.stack([alpha_mask] * 3, axis=2)
+                
+#                 # 알파 블렌딩
+#                 foreground = drone_rotated[:, :, :3]
+#                 blended_img = foreground * alpha_mask_3d + roi * (1 - alpha_mask_3d)
+                
+#                 # 합성 결과를 배경에 적용
+#                 background[y_pos:y_pos+drone_h, x_pos:x_pos+drone_w] = blended_img
+#             else:
+#                 # 알파 채널이 없는 경우 그냥 복사
+#                 background[y_pos:y_pos+drone_h, x_pos:x_pos+drone_w] = drone_rotated[:, :, :3]
+#         except Exception as e:
+#             print(f"이미지 합성 중 오류 발생: {e}")
+#             print(f"드론 크기: {drone_rotated.shape}, ROI 크기: {roi.shape}")
+#             continue
+        
+#         # YOLO 형식의 바운딩 박스 라벨 생성
+#         drone_center_x = (x_pos + drone_w/2) / bg_w
+#         drone_center_y = (y_pos + drone_h/2) / bg_h
+#         drone_width = drone_w / bg_w
+#         drone_height = drone_h / bg_h
+        
+#         # 드론 파일명 기반으로 저장 파일명 생성
+#         output_filename = f"{drone_base_name}_{i:04d}.png"
+#         label_filename = f"{drone_base_name}_{i:04d}.txt"
+        
+#         # 이미지 저장
+#         output_path = os.path.join(output_dir, output_filename)
+#         cv2.imwrite(output_path, background)
+        
+#         # 라벨 저장 (YOLO 형식) - 드론 시그널에 따라 클래스 ID 사용
+#         label_path = os.path.join(output_dir, label_filename)
+#         with open(label_path, 'w') as f:
+#             f.write(f"{class_id} {drone_center_x} {drone_center_y} {drone_width} {drone_height}\n")
+    
+#     print(f"{num_images}개의 합성 이미지가 {output_dir}에 생성되었습니다.")
+
+def create_synthetic_drone_images(drone_model_path, background_dir, output_dir, num_images=100):
+    """드론 모델을 다양한 배경에 합성하여 이미지와 라벨을 폴더별로 구분하여 저장"""
+    
+    # 1. 출력 디렉토리 구조 설정 (images, labels 폴더 생성)
+    img_output_dir = os.path.join(output_dir, 'images')
+    label_output_dir = os.path.join(output_dir, 'labels')
+    os.makedirs(img_output_dir, exist_ok=True)
+    os.makedirs(label_output_dir, exist_ok=True)
+    
+    # 드론 시그널 파일명에서 정보 추출
     drone_filename = os.path.basename(drone_model_path)
-    # 확장자 제거하여 기본 파일명 추출
     drone_base_name = os.path.splitext(drone_filename)[0]
     
-    # 파일명에서 숫자 추출
+    # 파일명에서 숫자 추출하여 클래스 ID 결정
     numbers = re.findall(r'\d+', drone_filename)
-    if numbers:
-        # 마지막 숫자를 사용하여 클래스 ID 결정 (signal_1 -> 클래스 0, signal_2 -> 클래스 1)
-        class_id = int(numbers[-1]) - 1
-        if class_id < 0:
-            class_id = 0
-    else:
-        # 숫자가 없으면 기본값 0 사용
-        class_id = 0
-        print(f"경고: 파일명에서 숫자를 찾을 수 없어 클래스 0을 사용합니다: {drone_filename}")
+    class_id = int(numbers[-1]) - 1 if numbers else 0
+    class_id = max(0, class_id)
     
-    print(f"드론 시그널: {drone_filename} -> 클래스 ID: {class_id}, 기본 파일명: {drone_base_name}")
+    print(f"🚀 합성 시작: {drone_filename} -> 클래스 ID: {class_id}")
     
-    # 드론 모델 이미지 로드 (알파 채널 포함)
+    # 드론 모델 이미지 로드
     drone = cv2.imread(drone_model_path, cv2.IMREAD_UNCHANGED)
-    
-    # 드론 이미지 디버깅
     if drone is None:
-        print(f"오류: 드론 이미지를 로드할 수 없습니다: {drone_model_path}")
+        print(f"❌ 오류: 드론 이미지를 로드할 수 없습니다: {drone_model_path}")
         return
     
-    print(f"드론 이미지 정보: 크기={drone.shape}, 타입={drone.dtype}")
-    
-    # 드론 이미지에 알파 채널이 없으면 추가
-    if len(drone.shape) == 2:  # 그레이스케일 이미지
+    # 알파 채널 보정
+    if len(drone.shape) == 2:
         drone = cv2.cvtColor(drone, cv2.COLOR_GRAY2BGRA)
-        drone[:, :, 3] = 255  # 완전 불투명 설정
-    elif drone.shape[2] == 3:  # BGR 이미지, 알파 채널 없음
+        drone[:, :, 3] = 255
+    elif drone.shape[2] == 3:
         b, g, r = cv2.split(drone)
         alpha = np.ones(b.shape, dtype=b.dtype) * 255
         drone = cv2.merge((b, g, r, alpha))
     
-    # 배경 이미지 목록
+    # 배경 이미지 목록 로드
     backgrounds = [os.path.join(background_dir, f) for f in os.listdir(background_dir)
                   if f.lower().endswith(('.jpg', '.png', '.jpeg'))]
     
     if not backgrounds:
-        print(f"오류: 배경 이미지를 찾을 수 없습니다: {background_dir}")
+        print(f"❌ 오류: 배경 이미지를 찾을 수 없습니다: {background_dir}")
         return
-    
-    os.makedirs(output_dir, exist_ok=True)
-    
-    for i in range(num_images):
-        # 랜덤 배경 선택
+
+    for i in tqdm(range(num_images)):
         bg_path = random.choice(backgrounds)
         background = cv2.imread(bg_path)
+        if background is None: continue
         
-        if background is None:
-            print(f"오류: 배경 이미지를 로드할 수 없습니다: {bg_path}")
-            continue
-        
-        # 배경 크기 조정
         bg_h, bg_w = background.shape[:2]
-        print(f"배경 크기: {bg_w}x{bg_h}")
-        
-        # 드론 크기 및 위치 랜덤화
-        # 원본 드론 크기
         drone_orig_h, drone_orig_w = drone.shape[:2]
-        print(f"드론 원본 크기: {drone_orig_w}x{drone_orig_h}")
         
-        # 드론이 배경보다 크면 배경에 맞게 크기 조정 (이 경우만 크기 조정)
+        # 드론 크기 조정
+        scale = 1.0
         if drone_orig_w > bg_w or drone_orig_h > bg_h:
-            max_width = int(bg_w)  # 배경의 90%로 제한
-            max_height = int(bg_h)  # 배경의 90%로 제한
-            
-            # 비율 유지하며 크기 조정
-            width_ratio = max_width / drone_orig_w
-            height_ratio = max_height / drone_orig_h
-            scale_factor = min(width_ratio, height_ratio)
-            
-            print(f"드론 이미지가 배경보다 큽니다. 스케일 팩터 {scale_factor}로 조정합니다.")
-            scale = scale_factor
-        else:
-            # 원본 크기 그대로 사용
-            scale = 1.0  # 원본 크기 유지
-            
-        print(f"적용된 스케일: {scale}, 드론 원본 크기: {drone_orig_w}x{drone_orig_h}")
+            scale = min(bg_w / drone_orig_w, bg_h / drone_orig_h)
+        
         drone_resized = cv2.resize(drone, (0, 0), fx=scale, fy=scale)
-        
-        # 드론 회전 적용 제외
         drone_h, drone_w = drone_resized.shape[:2]
-        print(f"크기 조정 후 드론 크기: {drone_w}x{drone_h}, 배경 크기: {bg_w}x{bg_h}")
         
-        # 회전 없이 그대로 사용
-        drone_rotated = drone_resized
+        # 드론 위치 랜덤 선택
+        max_x, max_y = max(1, bg_w - drone_w), max(1, bg_h - drone_h)
+        x_pos = random.randint(0, max_x)
+        y_pos = random.randint(0, max_y)
         
-        # 드론 위치 선택 (화면 중앙에 가깝게)
-        # 배경 이미지에서 드론이 들어갈 수 있는 최대 범위 계산
-        max_x = max(1, bg_w - drone_w)
-        max_y = max(1, bg_h - drone_h)
-        
-        # 가능한 범위 내에서 중앙 근처에 배치
-        x_left = max(0, min(bg_w//4, max_x//4))
-        x_right = max(x_left + 1, min(bg_w*3//4, max_x))
-        y_top = max(0, min(bg_h//4, max_y//4))
-        y_bottom = max(y_top + 1, min(bg_h*3//4, max_y))
-        
-        x_pos = random.randint(x_left, x_right)
-        y_pos = random.randint(y_top, y_bottom)
-        # y_pos = (0)
-        
-        print(f"드론 위치: ({x_pos}, {(y_pos)})")
-        
-        # 합성할 배경 영역 준비
+        # 알파 블렌딩 합성
         roi = background[y_pos:y_pos+drone_h, x_pos:x_pos+drone_w]
+        if drone_resized.shape[2] == 4:
+            alpha_mask = drone_resized[:, :, 3] / 255.0
+            alpha_mask_3d = np.stack([alpha_mask] * 3, axis=2)
+            foreground = drone_resized[:, :, :3]
+            blended_img = foreground * alpha_mask_3d + roi * (1 - alpha_mask_3d)
+            background[y_pos:y_pos+drone_h, x_pos:x_pos+drone_w] = blended_img
+        else:
+            background[y_pos:y_pos+drone_h, x_pos:x_pos+drone_w] = drone_resized[:, :, :3]
         
-        # 알파 블렌딩으로 이미지 합성
-        try:
-            if drone_rotated.shape[2] == 4:  # 알파 채널 존재
-                # 알파 마스크 추출
-                alpha_mask = drone_rotated[:, :, 3] / 255.0
-                alpha_mask_3d = np.stack([alpha_mask] * 3, axis=2)
-                
-                # 알파 블렌딩
-                foreground = drone_rotated[:, :, :3]
-                blended_img = foreground * alpha_mask_3d + roi * (1 - alpha_mask_3d)
-                
-                # 합성 결과를 배경에 적용
-                background[y_pos:y_pos+drone_h, x_pos:x_pos+drone_w] = blended_img
-            else:
-                # 알파 채널이 없는 경우 그냥 복사
-                background[y_pos:y_pos+drone_h, x_pos:x_pos+drone_w] = drone_rotated[:, :, :3]
-        except Exception as e:
-            print(f"이미지 합성 중 오류 발생: {e}")
-            print(f"드론 크기: {drone_rotated.shape}, ROI 크기: {roi.shape}")
-            continue
-        
-        # YOLO 형식의 바운딩 박스 라벨 생성
+        # YOLO 라벨 계산
         drone_center_x = (x_pos + drone_w/2) / bg_w
         drone_center_y = (y_pos + drone_h/2) / bg_h
         drone_width = drone_w / bg_w
         drone_height = drone_h / bg_h
         
-        # 드론 파일명 기반으로 저장 파일명 생성
-        output_filename = f"{drone_base_name}_{i:04d}.png"
-        label_filename = f"{drone_base_name}_{i:04d}.txt"
+        # 💾 저장 처리 (수정된 핵심 부분)
+        save_base_name = f"{drone_base_name}_{i:04d}"
         
-        # 이미지 저장
-        output_path = os.path.join(output_dir, output_filename)
-        cv2.imwrite(output_path, background)
+        # 1) 이미지 저장 (images 폴더)
+        img_save_path = os.path.join(img_output_dir, f"{save_base_name}.png")
+        cv2.imwrite(img_save_path, background)
         
-        # 라벨 저장 (YOLO 형식) - 드론 시그널에 따라 클래스 ID 사용
-        label_path = os.path.join(output_dir, label_filename)
-        with open(label_path, 'w') as f:
-            f.write(f"{class_id} {drone_center_x} {drone_center_y} {drone_width} {drone_height}\n")
+        # 2) 라벨 저장 (labels 폴더)
+        label_save_path = os.path.join(label_output_dir, f"{save_base_name}.txt")
+        with open(label_save_path, 'w') as f:
+            f.write(f"{class_id} {drone_center_x:.6f} {drone_center_y:.6f} {drone_width:.6f} {drone_height:.6f}\n")
     
-    print(f"{num_images}개의 합성 이미지가 {output_dir}에 생성되었습니다.")
+    print(f"✅ {num_images}개의 데이터 세트 생성 완료!")
+    print(f"📂 이미지 경로: {img_output_dir}")
+    print(f"📂 라벨 경로: {label_output_dir}")
 
-#############################
-# 객체 포함 여부 판단 정밀화 
-#############################
 def batch_slice_yolo_polygon(input_img_dir, input_label_dir, output_dir, tile_size=1024, overlap=0.1):
     out_img_path = os.path.join(output_dir, 'images')
     out_label_path = os.path.join(output_dir, 'labels')
@@ -1085,7 +1518,6 @@ def batch_slice_yolo_polygon(input_img_dir, input_label_dir, output_dir, tile_si
                     cv2.imwrite(os.path.join(out_img_path, f"{save_name}.jpg"), tile_img)
                     with open(os.path.join(out_label_path, f"{save_name}.txt"), 'w') as f_out:
                         f_out.write("\n".join(tile_labels))
-#############################
 
 def batch_slice_yolo_polygon_integrated(input_img_dir, input_label_dir, output_dir, tile_size=1024, overlap=0.2):
     """
@@ -1257,6 +1689,89 @@ def batch_slice_yolo_polygon_complete_only(input_img_dir, input_label_dir, outpu
                     with open(os.path.join(out_label_path, f"{save_name}.txt"), 'w') as f_out:
                         f_out.write("\n".join(tile_labels))
 
+def batch_slice_yolo_box_complete_only(input_img_dir, input_label_dir, output_dir, tile_size=1024, overlap=0.3):
+    """
+    YOLO Box(Detection) 전용 슬라이싱:
+    타일 경계에 잘린 객체는 무시하고, 타일 내부에 100% 포함된 박스만 저장
+    """
+    out_img_path = os.path.join(output_dir, 'images')
+    out_label_path = os.path.join(output_dir, 'labels')
+    os.makedirs(out_img_path, exist_ok=True)
+    os.makedirs(out_label_path, exist_ok=True)
+
+    img_files = []
+    for ext in ['*.jpg', '*.jpeg', '*.png', '*.bmp']:
+        img_files.extend(glob.glob(os.path.join(input_img_dir, ext)))
+
+    print(f"🚀 Box 완전 포함 전용 슬라이싱 시작: {len(img_files)}개 파일")
+
+    for img_path in tqdm(img_files):
+        img_name = os.path.splitext(os.path.basename(img_path))[0]
+        label_path = os.path.join(input_label_dir, f"{img_name}.txt")
+        if not os.path.exists(label_path): continue
+
+        image = cv2.imread(img_path)
+        if image is None: continue
+        h_orig, w_orig, _ = image.shape
+        
+        with open(label_path, 'r') as f:
+            lines = f.readlines()
+
+        step = int(tile_size * (1 - overlap))
+
+        for y in range(0, h_orig, step):
+            for x in range(0, w_orig, step):
+                # 타일의 끝 지점 계산
+                x_end = min(x + tile_size, w_orig)
+                y_end = min(y + tile_size, h_orig)
+                
+                # 타일의 실제 시작 지점 (이미지 경계 처리)
+                x_start = max(0, x_end - tile_size)
+                y_start = max(0, y_end - tile_size)
+
+                tile_labels = []
+
+                for line in lines:
+                    parts = line.strip().split()
+                    if len(parts) != 5: continue
+                    
+                    class_id = parts[0]
+                    # 정규화 좌표 -> 픽셀 좌표 복원
+                    cx, cy, bw, bh = map(float, parts[1:])
+                    
+                    # 박스의 좌상단(x1, y1) 및 우하단(x2, y2) 계산
+                    x1 = (cx - bw/2) * w_orig
+                    y1 = (cy - bh/2) * h_orig
+                    x2 = (cx + bw/2) * w_orig
+                    y2 = (cy + bh/2) * h_orig
+
+                    # 핵심 로직: 박스의 모든 경계가 타일 내부에 포함되는지 체크
+                    if (x1 >= x_start and x2 <= x_end and 
+                        y1 >= y_start and y2 <= y_end):
+                        
+                        # 타일 기준의 새로운 정규화 중심 좌표 및 크기 계산
+                        new_cx = (x1 + x2) / 2 - x_start
+                        new_cy = (y1 + y2) / 2 - y_start
+                        
+                        # 타일 크기로 정규화 (0~1)
+                        final_cx = new_cx / tile_size
+                        final_cy = new_cy / tile_size
+                        final_w = (x2 - x1) / tile_size
+                        final_h = (y2 - y1) / tile_size
+
+                        tile_labels.append(f"{class_id} {final_cx:.6f} {final_cy:.6f} {final_w:.6f} {final_h:.6f}")
+
+                # 온전한 박스가 하나라도 있는 타일만 이미지와 라벨 저장
+                if tile_labels:
+                    tile_img = image[y_start:y_end, x_start:x_end]
+                    save_name = f"{img_name}_tile_{x_start}_{y_start}"
+                    
+                    cv2.imwrite(os.path.join(out_img_path, f"{save_name}.png"), tile_img)
+                    with open(os.path.join(out_label_path, f"{save_name}.txt"), 'w') as f_out:
+                        f_out.write("\n".join(tile_labels))
+
+    print(f"✅ 슬라이싱 완료: {output_dir}")
+
 def create_tile_gallery(sliced_img_dir, sliced_label_dir, output_file, grid_size=(4, 4), thumb_size=(400, 400)):
     """
     슬라이싱된 타일들과 라벨을 시각화하여 하나의 큰 갤러리 이미지로 저장
@@ -1318,6 +1833,199 @@ def create_tile_gallery(sliced_img_dir, sliced_label_dir, output_file, grid_size
     cv2.imwrite(output_file, final_gallery)
     print(f"✅ 갤러리 생성 완료: {output_file}")
 
+def resize_data_label_box(img_dir, label_dir, out_img_dir, out_label_dir, target_w=889, target_h=303):
+    """
+    YOLO Box(Detection) 형식의 라벨을 리사이징된 캔버스에 맞춰 정확히 변환
+    """
+    os.makedirs(out_img_dir, exist_ok=True)
+    os.makedirs(out_label_dir, exist_ok=True)
+    
+    img_list = [f for f in os.listdir(img_dir) if f.lower().endswith(('.png', '.jpg'))]
+
+    for filename in tqdm(img_list):
+        img = cv2.imread(os.path.join(img_dir, filename))
+        if img is None: continue
+        h0, w0 = img.shape[:2]
+        
+        # 1. 비율 유지(Letterbox) 스케일 계산
+        r = min(target_w / w0, target_h / h0)
+        new_w, new_h = int(w0 * r), int(h0 * r)
+        
+        # 2. 이미지 변환 및 (0,0) 배치
+        resized_img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        canvas = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+        canvas[:new_h, :new_w] = resized_img
+        cv2.imwrite(os.path.join(out_img_dir, filename), canvas)
+
+        # 3. Box 좌표 변환
+        label_path = os.path.join(label_dir, os.path.splitext(filename)[0] + ".txt")
+        if not os.path.exists(label_path): continue
+        
+        final_labels = []
+        with open(label_path, 'r') as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) != 5: continue # Box 형식이 아니면 스킵
+                
+                cls, cx, cy, w, h = map(float, parts)
+                
+                # 원본 픽셀로 복원 -> 리사이즈 스케일 적용 -> 새 캔버스 기준 정규화
+                # 가로(x, w)는 target_w 기준, 세로(y, h)는 target_h 기준으로 재정규화
+                new_cx = (cx * w0 * r) / target_w
+                new_cy = (cy * h0 * r) / target_h
+                new_w = (w * w0 * r) / target_w
+                new_h = (h * h0 * r) / target_h
+                
+                final_labels.append(f"{int(cls)} {new_cx:.6f} {new_cy:.6f} {new_w:.6f} {new_h:.6f}")
+
+        with open(os.path.join(out_label_dir, os.path.splitext(filename)[0] + ".txt"), 'w') as f:
+            f.write("\n".join(final_labels))
+
+    print(f"✅ Box 데이터 변환 완료: {target_w}x{target_h}")
+
+def verify_resize_box_fix(img_path, label_path, save_path, target_w=889, target_h=303):
+    """ 검수용: 사각형(Box) 그리기 """
+    canvas = cv2.imread(img_path)
+    if canvas is None: return
+    
+    if os.path.exists(label_path):
+        with open(label_path, 'r') as f:
+            for line in f:
+                parts = list(map(float, line.strip().split()))
+                cx, cy, w, h = parts[1:]
+                
+                # 픽셀 좌표로 변환
+                x1 = int((cx - w/2) * target_w)
+                y1 = int((cy - h/2) * target_h)
+                x2 = int((cx + w/2) * target_w)
+                y2 = int((cy + h/2) * target_h)
+                
+                cv2.rectangle(canvas, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    
+    # save_path가 디렉토리면 파일 이름 자동 생성
+    if os.path.isdir(save_path):
+        os.makedirs(save_path, exist_ok=True)
+        base = os.path.splitext(os.path.basename(img_path))[0]
+        save_path = os.path.join(save_path, base + '_verify.png')
+
+    cv2.imwrite(save_path, canvas)
+    print(f"✅ 검수 이미지 저장 완료: {save_path} ({target_w}x{target_h})")
+
+def resize_data_label_polygon(img_dir, label_dir, out_img_dir, out_label_dir, target_w=889, target_h=303):
+    """
+    임의의 target_w, target_h로 리사이징하며 비율 왜곡 없이 라벨 좌표를 수정
+    """
+    os.makedirs(out_img_dir, exist_ok=True)
+    os.makedirs(out_label_dir, exist_ok=True)
+    
+    img_list = [f for f in os.listdir(img_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+
+    for filename in tqdm(img_list):
+        # 1. 이미지 로드
+        img = cv2.imread(os.path.join(img_dir, filename))
+        if img is None: continue
+        h0, w0 = img.shape[:2]
+        
+        # 2. 비율 유지 스케일(r) 계산
+        # 원본의 긴 쪽을 target 크기에 맞추는 스케일 결정
+        r = min(target_w / w0, target_h / h0)
+        new_w, new_h = int(round(w0 * r)), int(round(h0 * r))
+        
+        # 이미지 실제 리사이징
+        resized_img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        
+        # 3. 캔버스 생성 및 이미지 배치 (검은색 배경 패딩)
+        # 사용자가 입력한 임의의 사이즈로 배경 생성
+        canvas = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+        canvas[:new_h, :new_w] = resized_img  # 좌상단 배치 기준
+        cv2.imwrite(os.path.join(out_img_dir, filename), canvas)
+
+        # 4. 라벨 좌표 재계산 (비율 변화 및 패딩 반영)
+        label_path = os.path.join(label_dir, os.path.splitext(filename)[0] + ".txt")
+        if not os.path.exists(label_path): continue
+        
+        new_label_data = []
+        with open(label_path, 'r') as f:
+            for line in f:
+                parts = line.strip().split()
+                if not parts: continue
+                
+                class_id = parts[0]
+                # x1 y1 x2 y2 ... 형태의 폴리곤 좌표 추출
+                coords = np.array(list(map(float, parts[1:]))).reshape(-1, 2)
+                
+                # [변환 공식]
+                # 1. 원본 정규화 좌표 -> 원본 픽셀 좌표: x * w0, y * h0
+                # 2. 리사이징 스케일 적용: (x * w0) * r, (y * h0) * r
+                # 3. 새 캔버스 기준 정규화: (상단 결과) / target_w, (상단 결과) / target_h
+                
+                coords[:, 0] = (coords[:, 0] * w0 * r) / target_w
+                coords[:, 1] = (coords[:, 1] * h0 * r) / target_h
+                
+                new_coords_str = " ".join([f"{x:.6f} {y:.6f}" for x, y in coords])
+                new_label_data.append(f"{class_id} {new_coords_str}")
+
+        with open(os.path.join(out_label_dir, os.path.splitext(filename)[0] + ".txt"), 'w') as f:
+            f.write("\n".join(new_label_data))
+
+    print(f"🚀 완료: {target_w}x{target_h} 크기로 {len(img_list)}개의 데이터 변환됨")
+
+def verify_resized_polygon(img_path, label_path, save_path, target_w=889, target_h=303):
+    """
+    임의의 해상도에서 리사이징된 이미지와 라벨이 일치하는지 시각화 검수
+    """
+    # 1. 원본 이미지 로드
+    img = cv2.imread(img_path)
+    if img is None:
+        print(f"❌ 이미지를 찾을 수 없습니다: {img_path}")
+        return
+    h0, w0 = img.shape[:2]
+    
+    # 2. 비율 유지(Letterbox) 스케일 계산 (resize_data_custom과 동일한 로직)
+    r = min(target_w / w0, target_h / h0)
+    new_w, new_h = int(round(w0 * r)), int(round(h0 * r))
+    
+    # 실제 리사이징 및 캔버스(Padding) 생성
+    resized_img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    canvas = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+    canvas[:new_h, :new_w] = resized_img
+    
+    # 3. 라벨 로드 및 캔버스 좌표로 변환하여 그리기
+    if os.path.exists(label_path):
+        with open(label_path, 'r') as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) < 3: continue
+                
+                class_id = parts[0]
+                # 정규화된 좌표(0~1)를 가져옴
+                coords = np.array(list(map(float, parts[1:]))).reshape(-1, 2)
+                
+                # [변환 로직]
+                # 리사이징된 이미지 크기(new_w, new_h)가 아니라 
+                # 최종 캔버스 크기(target_w, target_h)를 곱해야 정확한 위치에 그려짐
+                vis_coords = coords.copy()
+                vis_coords[:, 0] *= target_w
+                vis_coords[:, 1] *= target_h
+                
+                pts = vis_coords.astype(np.int32).reshape((-1, 1, 2))
+                
+                # 폴리곤 그리기 (형광색 선으로 가시성 확보)
+                cv2.polylines(canvas, [pts], isClosed=True, color=(0, 255, 0), thickness=2)
+                # 클래스 아이디 표시
+                cv2.putText(canvas, f"ID:{class_id}", tuple(pts[0][0]), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
+    # save_path가 디렉토리면 파일 이름 자동 생성
+    if os.path.isdir(save_path):
+        os.makedirs(save_path, exist_ok=True)
+        base = os.path.splitext(os.path.basename(img_path))[0]
+        save_path = os.path.join(save_path, base + '_verify.png')
+
+    # 4. 결과 저장
+    cv2.imwrite(save_path, canvas)
+    print(f"✅ 검수 이미지 저장 완료: {save_path} ({target_w}x{target_h})")
+
 def main():
     parser = argparse.ArgumentParser(description="객체 인식 데이터셋 준비 도구")
     subparsers = parser.add_subparsers(dest='command', help='명령어')
@@ -1361,7 +2069,8 @@ def main():
     
     # 데이터셋 미리보기
     preview_parser = subparsers.add_parser('preview', help='데이터셋 미리보기')
-    preview_parser.add_argument('--dir', type=str, required=True, help='데이터셋 디렉토리')
+    preview_parser.add_argument('--image_dir', type=str, required=True, help='이미지지 디렉토리')
+    preview_parser.add_argument('--label_dir', type=str, required=True, help='라벨 디렉토리')
     preview_parser.add_argument('--num', type=int, default=5, help='미리볼 샘플 수')
     preview_parser.add_argument('--seed', type=int, default=42, help='랜덤 시드')
 
@@ -1373,22 +2082,22 @@ def main():
     preview_parser.add_argument('--grid', type=int, nargs=2, default=[4, 4], help='그리드 가로 세로 사이즈 (예: --grid 4 4)')
     
     # 데이터셋 만들기
-    synthetic_parser = subparsers.add_parser('synthetic', help='데이터셋 만들기')
+    synthetic_parser = subparsers.add_parser('synthetic', help='데이터셋 만들기 (박스 마스크 적용)')
     synthetic_parser.add_argument('--drone', type=str, required=True, help='드론 이미지')
     synthetic_parser.add_argument('--back', type=str, required=True, help='백그라운드 이미지 디렉토리')
     synthetic_parser.add_argument('--output', type=str, required=True, help='출력 디렉토리')
     synthetic_parser.add_argument('--num', type=int, default=5, help='이미지 생성 개수')
     
     # 데이터셋 만들기 (스케일럿 마스크 적용)
-    synthetic_skeletal_parser = subparsers.add_parser('synthetic_skeletal', help='데이터셋 만들기 (스케일럿 마스크 적용)')
-    synthetic_skeletal_parser.add_argument('--drone', type=str, required=True, help='드론 이미지')
+    synthetic_skeletal_parser = subparsers.add_parser('synthetic_skeletal', help='데이터셋 만들기 (모든 점을 감싸는 가장 타이트한 볼록 다각형 생성(polygon))')
+    synthetic_skeletal_parser.add_argument('--drone_dir', type=str, required=True, help='드론 이미지 디렉토리')
     synthetic_skeletal_parser.add_argument('--back_dir', type=str, required=True, help='백그라운드 이미지 디렉토리')
     synthetic_skeletal_parser.add_argument('--output_dir', type=str, required=True, help='출력 디렉토리')
     synthetic_skeletal_parser.add_argument('--num', type=int, default=5, help='이미지 생성 개수')
     synthetic_skeletal_parser.add_argument('--mask_type', type=str, default='polygon', help='마스크 타입 (line, polygon)')
 
     # 데이터셋 만들기 (mountain 모양 스케일럿 마스크 적용)
-    synthetic_skeletal_parser = subparsers.add_parser('synthetic_mountain', help='데이터셋 만들기 (신호 패턴이 쌍봉 모양일 경우 적용)')
+    synthetic_skeletal_parser = subparsers.add_parser('synthetic_mountain', help='데이터셋 만들기 (신호 패턴이 쌍봉 모양일 경우 적용(polygon))')
     synthetic_skeletal_parser.add_argument('--drone', type=str, required=True, help='드론 이미지')
     synthetic_skeletal_parser.add_argument('--back_dir', type=str, required=True, help='백그라운드 이미지 디렉토리')
     synthetic_skeletal_parser.add_argument('--output_dir', type=str, required=True, help='출력 디렉토리')
@@ -1423,19 +2132,21 @@ def main():
     elif args.command == 'augment':
         augment_dataset(args.dir, args.num, args.seed)
     elif args.command == 'preview':
-        preview_dataset(args.dir, args.num, args.seed)
+        preview_dataset(args.image_dir, args.label_dir, args.num, args.seed)
     elif args.command == 'view_tile':
         create_tile_gallery(args.image_dir, args.label_dir, args.out_file)
     elif args.command == 'synthetic':
-        create_synthetic_drone_images(args.drone, args.back, args.output, args.num)
+        create_synthetic_drone_images(args.drone, args.back, args.output, args.num) # box label
     elif args.command == 'synthetic_skeletal':
-        synthesize_advanced(args.drone, args.back_dir, args.output_dir, args.num, args.mask_type) # 일반 사각형 형태에 적용.
+        # synthesize_advanced(args.drone, args.back_dir, args.output_dir, args.num, args.mask_type) # 모든 점을 감싸는 가장 타이트한 볼록 다각형 생성(polygon).
+        synthesize_advanced_folder(args.drone_dir, args.back_dir, args.output_dir, args.num, args.mask_type)
     elif args.command == 'synthetic_mountain':
-        synthesize_advanced_mountain_shape(args.drone, args.back_dir, args.output_dir, args.num, args.mask_type) # 뾰족한 산모양의 경우 적용.
+        synthesize_advanced_mountain_shape(args.drone, args.back_dir, args.output_dir, args.num, args.mask_type) # 뾰족한 산모양의 경우 적용(polygon).
     elif args.command == 'slice_image':
         # batch_slice_yolo_polygon(args.img_dir, args.label_dir, args.output_dir, args.size, args.overlap) # Box와 polygon 별도로 분리
         # batch_slice_yolo_polygon_integrated(args.img_dir, args.label_dir, args.output_dir, args.size, args.overlap) # 모든 형식 polygon으로 통일
         batch_slice_yolo_polygon_complete_only(args.img_dir, args.label_dir, args.output_dir, args.size, args.overlap) # 모든 객체가 타일안에 있는 경우만 저장
+        # batch_slice_yolo_box_complete_only(args.img_dir, args.label_dir, args.output_dir, args.size, args.overlap) # 모든 객체가 타일안에 있는 경우만 저장
     elif args.command == 'delete':
         delete_files_with_suffix(args.dir, args.suffix)
     else:
@@ -1447,55 +2158,88 @@ if __name__ == "__main__":
 ########################################################
 ## command example
 ########################################################
-drone_path = './datasets/drone_data/signal/mini2_sig1_1.png'    # 사용할 시그널 이미지 파일 
+drone_path = './datasets/drone_data/signal/mini2_mini3_sig_1.png'    # 사용할 시그널 이미지 파일 
+drone_dir = './datasets/drone_data/signal'
 background_dir = './datasets/drone_data/background'     # 배경 이미지들이 들어있는 폴더 경로
 synthetic_output_dir = './datasets/synthetic' # 합성 이미지 저장될 경로
 img_dir = './datasets/synthetic/images'
 label_dir = './datasets/synthetic/labels'
+resize_img_dir = './datasets/synthetic/resized/images'
+resize_label_dir = './datasets/synthetic/resized/labels'
 sliced_out_dir = './datasets/synthetic/sliced_data'
 sliced_img_dir = './datasets/synthetic/sliced_data/images'
 sliced_label_dir = './datasets/synthetic/sliced_data/labels'
 final_output_dir = './datasets' # 최종 분할 데이터셋 저장될 경로
 
 ##############################################
-# # 슬라이스된 이미지+라벨 view
-##############################################
-# create_tile_gallery(sliced_img_dir, sliced_label_dir, './datasets/synthetic/sliced_data/tile_view.png', grid_size=(4, 4), thumb_size=(400, 400))
-
-##############################################
-# # 드론 이미지 합성 (박스 마스크 적용)
+# 1. 드론 이미지 합성 (박스 마스크 적용)
 ##############################################
 # # python prepare_data.py synthetic --drone ./datasets/drone_data/signal/autelevo_01_sig_2.png --back ./datasets/drone_data/background --output ./datasets/synthetic --num 100
 # create_synthetic_drone_images(drone_path, background_dir, synthetic_output_dir, num_images=50)
 
 ##############################################
-# # 드론 이미지 합성 (스케일럿 마스크 적용) - 신호 패턴이 단순 사각형 모양일 경우 적용
+# 1. 드론 이미지 합성 (스케일럿(폴리곤) 마스크 적용) 
+# - 기존 advanced_mountain_shape을 advanced로 변경 (모든 점을 감싸는 가장 타이트한 볼록 다각형 생성)
 ##############################################
 # # python prepare_data.py synthetic_skeletal --drone ./datasets/drone_data/signal/signal_4.png --back_dir ./datasets/drone_data/background --output_dir ./datasets/synthetic --num 5 --mask_type line
-# synthesize_advanced(drone_path, background_dir, synthetic_output_dir, num_gen=50, mask_type='polygon') # mask_type='line')
+# synthesize_advanced(drone_path, background_dir, synthetic_output_dir, num_gen=50, mask_type='polygon') # mask_type='line') # 신호 패턴이 단순 사각형 모양일 경우 적용
+# synthesize_advanced(drone_path, background_dir, synthetic_output_dir, num_gen=50) # (모든 점을 감싸는 가장 타이트한 볼록 다각형 생성)
+synthesize_advanced_folder(drone_dir, background_dir, synthetic_output_dir, num_gen=50)
 
-##############################################
-# # 드론 이미지 합성 (산모양 스케일럿 마스크 적용) - 신호 패턴이 쌍봉 모양일 경우 적용
-##############################################
+####################################################################################
+# 1. 드론 이미지 합성 (산모양 스케일럿(폴리곤) 마스크 적용) - 신호 패턴이 쌍봉 모양일 경우 적용
+####################################################################################
 # # python prepare_data.py synthetic_mountain --drone ./datasets/drone_data/signal/signal_4.png --back_dir ./datasets/drone_data/background --output_dir ./datasets/synthetic --num 5 --mask_type line
-# synthesize_advanced_mountain_shape(drone_path, background_dir, synthetic_output_dir, num_gen=50, mask_type='polygon')
+# synthesize_advanced_mountain_shape(drone_path, background_dir, synthetic_output_dir, num_gen=50) #, mask_type='polygon')
 
 ##############################################
-# # 합성 이미지 슬라이싱
+# 2. resize image and label Box
+##############################################
+# resize_data_label_box(img_dir, label_dir, resize_img_dir, resize_label_dir, target_w=1280, target_h=437)
+
+# resize_img_path = './datasets/synthetic/resize/images/mini2_mini3_sig_1_0034.png'
+# resize_label_path = './datasets/synthetic/resize/labels/mini2_mini3_sig_1_0034.txt'
+# save_path = './datasets/synthetic/resize'
+# verify_resize_box_fix(resize_img_path, resize_label_path, save_path, target_w=1280, target_h=437)
+
+##############################################
+# 2. resize image and label Polygon
+##############################################
+resize_data_label_polygon(img_dir, label_dir, resize_img_dir, resize_label_dir, target_w=1280, target_h=437)
+
+# resize_img_path = './datasets/synthetic/resize/images/mini2_mini3_sig5_1_0019.png'
+# resize_label_path = './datasets/synthetic/resize/labels/mini2_mini3_sig5_1_0019.txt'
+# save_path = './datasets/synthetic/resize'
+# verify_resized_polygon(resize_img_path, resize_label_path, save_path, target_w=1280, target_h=437)
+
+##############################################
+# 2. 합성 이미지 슬라이싱
 ##############################################
 # python prepare_data.py slice_image --img_dir ./datasets/drone_data/signal --label_dir ./datasets/drone_data/background --output_dir ./datasets/synthetic --size 2560 --overlap 0.3
+# batch_slice_yolo_box_complete_only(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.4) # 모든 객체가 타일안에 있는 경우만 저장(box)
 # batch_slice_yolo_polygon(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.4) # Box와 polygon 별도로 분리
-# batch_slice_yolo_polygon_integrated(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.4) # 모든 형식 polygon으로 통일
-# batch_slice_yolo_polygon_complete_only(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.4) # 모든 객체가 타일안에 있는 경우만 저장
+# batch_slice_yolo_polygon_integrated(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.4) # 모든 형식 polygon으로 통일(잘리는영역 crop)
+batch_slice_yolo_polygon_complete_only(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.4) # 모든 객체가 타일안에 있는 경우만 저장(polygon)
 
 ##############################################
-# # 원본 이미지 분할 (train, val, test)  
+# 3. 원본 이미지 분할 (train, val, test)  
 # ############################################## 
 # # python prepare_data.py split --images ./datasets/synthetic --labels ./datasets/synthetic --output ./datasets --train 0.7 --val 0.2 --test 0.1
-# split_dataset(img_dir, label_dir, None, final_output_dir, train_ratio=0.8, val_ratio=0.2, test_ratio=0.0)
+split_dataset(resize_img_dir, resize_label_dir, None, final_output_dir, train_ratio=0.8, val_ratio=0.2, test_ratio=0.0)
 
 ##############################################
-# # 슬라이싱 이미지 묶음 분할 (train, val, test)
+# 3. 슬라이싱 이미지 묶음 분할 (train, val, test)
 ##############################################
 # # python prepare_data.py split_sliced --images ./datasets/synthetic/images --labels ./datasets/synthetic/labels --output ./datasets --train 0.7 --val 0.2 --test 0.1
-# split_sliced_dataset(sliced_img_dir, sliced_label_dir, final_output_dir, train_ratio=0.8, val_ratio=0.2, test_ratio=0.0)
+split_sliced_dataset(sliced_img_dir, sliced_label_dir, final_output_dir, train_ratio=0.8, val_ratio=0.2, test_ratio=0.0)
+
+##############################################
+# 4. Polygon 슬라이스된 이미지+라벨 view
+##############################################
+# out_path = './datasets/synthetic/sliced_data/tile_view.png'
+# create_tile_gallery(sliced_img_dir, sliced_label_dir, out_path, grid_size=(4, 4), thumb_size=(400, 400))
+
+##############################################
+# 4. Box 슬라이스된 이미지+라벨 view
+##############################################
+# preview_dataset(sliced_img_dir, sliced_label_dir)

@@ -1,6 +1,27 @@
-train: E:\0_subby_works\python\pytorch_yolov5\datasets\images\train
-val: E:\0_subby_works\python\pytorch_yolov5\datasets\images\val
+# train: E:\0_subby_works\python\pytorch_yolov5\datasets\images\train
+# val: E:\0_subby_works\python\pytorch_yolov5\datasets\images\val
 
+# nc: 2
+# # names: ['drone']
+# names : ['mini','autelevo']
+
+
+#####################################################################
+# 신규데이터로 추가 학습시 기존데이터도 일부 포함 시킴
+# combine data yaml
+#####################################################################
+path: E:/0_subby_works/python/pytorch_yolov5/datasets # 이미지와 라벨이 들어있는 최상위 루트
+
+# Train 경로: 리스트로 나열하면 통합 학습됩니다.
+train: 
+  - images/train/resized_images
+  - images/train/sliced_images
+
+# Val 경로: 두 가지 케이스를 모두 검증합니다.
+val: 
+  - images/val/resized_images
+  - images/val/sliced_images
+
+# 클래스 정보
 nc: 2
-# names: ['drone']
-names : ['mini','autelevo']
+names: ['mini', 'autelevo']

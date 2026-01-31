@@ -134,7 +134,7 @@ def predict(image_path, save_dir, weights, confidence_threshold=0.5):
     # 결과가 비어있는 경우 처리
     if len(results) == 0 or len(results[0].boxes) == 0:
         print("검출된 객체가 없습니다.")
-        return np.array([])
+        # return np.array([])
 
     result = results[0] # 첫 번째 이미지 결과
     boxes = result.boxes # 필터링은 이미 model.predict(conf=...)에서 완료됨
@@ -324,36 +324,35 @@ if __name__ == "__main__":
     #     57: 'couch', 58: 'potted plant', 59: 'bed', 60: 'dining table', 61: 'toilet', 62: 'tv', 63: 'laptop', 64: 'mouse', 65: 'remote', 66: 'keyboard', 67: 'cell phone', 68: 'microwave', 69: 'oven', 70: 'toaster', 71: 'sink', 72: 'refrigerator', 73: 'book', 74: 'clock', 75: 'vase', 76: 'scissors', 77: 'teddy bear', 78: 'hair drier', 79: 'toothbrush'}
     
     image_path = 'datasets/drone_data/img/mini2_mini3_9.png'  # 예측할 이미지 경로
-    # image_path = 'drone_data/result_frame_138848079307226420_bw_125E+6.png'  # 예측할 이미지 경로
     save_directory = 'datasets'  # 결과를 저장할 사용자 지정 폴더
-    # weights='last.pt'
-    weights='best.pt'#'yolov5su'#
+    weights='best-seg_resize_base_add_slice_add_total.pt'#'yolov5su'#
+    # weights='best-det.pt'
     confidence_threshold = 0.5  # 신뢰도 임계값 설정
 
     ###############################################################################
     # 원본 이미지 추론 실행
     ###############################################################################
-    # predictions = predict(
-    #     image_path, 
-    #     save_dir=save_directory, 
-    #     weights=weights, 
-    #     confidence_threshold=confidence_threshold
-    # )
-    # print(f'\npredictions.data \n{predictions.data}')  # 예측 결과 출력
+    predictions = predict(
+        image_path, 
+        save_dir=save_directory, 
+        weights=weights, 
+        confidence_threshold=confidence_threshold
+    )
+    print(f'\npredictions.data \n{predictions}')  # 예측 결과 출력
     ###############################################################################
    
     ###############################################################################
     # 슬라이싱 이미지 추론 실행
     ###############################################################################
-    predictions = predict_with_slicing(
-        image_path, 
-        save_dir=save_directory, 
-        weights=weights, 
-        tile_size=2560,   # 학습 시 설정한 크기와 동일하게
-        overlap=0.3,      # 학습 시 설정한 중첩률
-        confidence_threshold=confidence_threshold
-    )
-    print(f"검출된 총 객체 수: {len(predictions)}")
+    # predictions = predict_with_slicing(
+    #     image_path, 
+    #     save_dir=save_directory, 
+    #     weights=weights, 
+    #     tile_size=2560,   # 학습 시 설정한 크기와 동일하게
+    #     overlap=0.3,      # 학습 시 설정한 중첩률
+    #     confidence_threshold=confidence_threshold
+    # )
+    # print(f"검출된 총 객체 수: {len(predictions)}")
     ###############################################################################
 
     # camera capture test

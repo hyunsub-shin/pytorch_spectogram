@@ -34,8 +34,9 @@ def main():
         batch=batch,     # 배치 크기
         name='final',    # 결과 폴더 이름
         device=device,
-    #    lr0 = lr0,      # 추가 학습시 적용
-    #    freeze=10,       # 0~10번 레이어(Backbone 일부)를 고정
+        lr0 = lr0,      # 추가 학습시 적용
+        # freeze=10,       # 0~10번 레이어(Backbone 일부)를 고정
+        # overlap_mask=True, # 세그멘테이션 성능 향상
         verbose=True     # 진행률 표시
     )
 
@@ -43,12 +44,15 @@ def main():
 
 
 if __name__ == "__main__":
-    img_size = (1280) #(4096, 11999)  #(206, 889) # (h, w)
+    img_size = (1280) #(303, 889) #앞으로적용(306, 896) #첫데이터셋(206, 889) #(h, w)
     batch = 2
-    epochs = 40
-    weights = 'yolo11n-seg.pt'
+    epochs = 70
+    # weights = 'yolo11n-seg.pt' # polygon label
+    weights = 'best-seg_resize_base_add_slice.pt'
+    # weights = 'yolo11n.pt' # box label
+    # weights = 'best-det_resize_base.pt'
     data_yaml = 'drone_dataset.yaml'
-    # lr0 = 0.001 # 추가 학습시 적용
+    lr0 = 0.0001 # 추가 학습시 적용
 
     main()
     
