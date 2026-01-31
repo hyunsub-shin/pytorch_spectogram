@@ -2184,7 +2184,7 @@ final_output_dir = './datasets' # 최종 분할 데이터셋 저장될 경로
 # # python prepare_data.py synthetic_skeletal --drone ./datasets/drone_data/signal/signal_4.png --back_dir ./datasets/drone_data/background --output_dir ./datasets/synthetic --num 5 --mask_type line
 # synthesize_advanced(drone_path, background_dir, synthetic_output_dir, num_gen=50, mask_type='polygon') # mask_type='line') # 신호 패턴이 단순 사각형 모양일 경우 적용
 # synthesize_advanced(drone_path, background_dir, synthetic_output_dir, num_gen=50) # (모든 점을 감싸는 가장 타이트한 볼록 다각형 생성)
-synthesize_advanced_folder(drone_dir, background_dir, synthetic_output_dir, num_gen=50)
+synthesize_advanced_folder(drone_dir, background_dir, synthetic_output_dir, num_gen=100)
 
 ####################################################################################
 # 1. 드론 이미지 합성 (산모양 스케일럿(폴리곤) 마스크 적용) - 신호 패턴이 쌍봉 모양일 경우 적용
@@ -2197,9 +2197,9 @@ synthesize_advanced_folder(drone_dir, background_dir, synthetic_output_dir, num_
 ##############################################
 # resize_data_label_box(img_dir, label_dir, resize_img_dir, resize_label_dir, target_w=1280, target_h=437)
 
-# resize_img_path = './datasets/synthetic/resize/images/mini2_mini3_sig_1_0034.png'
-# resize_label_path = './datasets/synthetic/resize/labels/mini2_mini3_sig_1_0034.txt'
-# save_path = './datasets/synthetic/resize'
+# resize_img_path = './datasets/synthetic/resized/images/mini2_mini3_sig_1_0034.png'
+# resize_label_path = './datasets/synthetic/resized/labels/mini2_mini3_sig_1_0034.txt'
+# save_path = './datasets/synthetic/resized'
 # verify_resize_box_fix(resize_img_path, resize_label_path, save_path, target_w=1280, target_h=437)
 
 ##############################################
@@ -2207,9 +2207,9 @@ synthesize_advanced_folder(drone_dir, background_dir, synthetic_output_dir, num_
 ##############################################
 resize_data_label_polygon(img_dir, label_dir, resize_img_dir, resize_label_dir, target_w=1280, target_h=437)
 
-# resize_img_path = './datasets/synthetic/resize/images/mini2_mini3_sig5_1_0019.png'
-# resize_label_path = './datasets/synthetic/resize/labels/mini2_mini3_sig5_1_0019.txt'
-# save_path = './datasets/synthetic/resize'
+# resize_img_path = './datasets/synthetic/resized/images/mini2_mini3_sig5_1_0019.png'
+# resize_label_path = './datasets/synthetic/resized/labels/mini2_mini3_sig5_1_0019.txt'
+# save_path = './datasets/synthetic/resized'
 # verify_resized_polygon(resize_img_path, resize_label_path, save_path, target_w=1280, target_h=437)
 
 ##############################################
