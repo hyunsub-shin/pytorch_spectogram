@@ -792,6 +792,8 @@ def split_dataset(images_dir, labels_dir, masks_dir, output_dir, train_ratio=0.7
         'test': image_files[val_end:]
     }
     
+    print(f"🚀 분할 시작: {images_dir} -> {output_dir}")
+
     # 각 분할에 대해 파일 복사 (YOLO 구조: images/…, labels/…, masks/…)
     for split, files in splits.items():
         print(f"{split} 데이터 복사 중: {len(files)} 파일")
@@ -858,6 +860,7 @@ def split_sliced_dataset(image_dir, label_dir, output_base_dir, train_ratio=0.7,
 
     print(f"--- [데이터 분할 시작: 사용자 지정 구조] ---")
     print(f"전체 원본 이미지 수: {total_count}")
+    print(f"🚀 분할 시작: {image_dir} -> {output_base_dir}")
 
     # 5. 파일 복사 및 폴더 정리
     for split_name, orig_list in split_map.items():
@@ -867,7 +870,7 @@ def split_sliced_dataset(image_dir, label_dir, output_base_dir, train_ratio=0.7,
         
         os.makedirs(target_img_dir, exist_ok=True)
         os.makedirs(target_lbl_dir, exist_ok=True)
-
+    
         for orig in tqdm(orig_list, desc=f"정리 중: {split_name}"):
             for img_file in original_groups[orig]:
                 # 1. 이미지 복사 (src -> images/{train,val,test})
@@ -1426,6 +1429,105 @@ def create_synthetic_drone_images(drone_model_path, background_dir, output_dir, 
     print(f"📂 이미지 경로: {img_output_dir}")
     print(f"📂 라벨 경로: {label_output_dir}")
 
+def create_synthetic_drone_images_folder(signal_folder, background_dir, output_dir, num_images=100):
+    """폴더 내 모든 드론 모델을 배경과 합성하여 이미지와 YOLO 라벨 저장"""
+    
+    # 1. 출력 디렉토리 구조 설정
+    img_output_dir = os.path.join(output_dir, 'images')
+    label_output_dir = os.path.join(output_dir, 'labels')
+    os.makedirs(img_output_dir, exist_ok=True)
+    os.makedirs(label_output_dir, exist_ok=True)
+    
+    # 신호 폴더 내 이미지 파일들 가져오기
+    signal_list = [f for f in glob.glob(os.path.join(signal_folder, "*.*")) 
+                   if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+    
+    # 배경 이미지 목록 로드
+    backgrounds = [os.path.join(background_dir, f) for f in os.listdir(background_dir)
+                  if f.lower().endswith(('.jpg', '.png', '.jpeg'))]
+    
+    if not signal_list or not backgrounds:
+        print("❌ 신호 또는 배경 이미지를 찾을 수 없습니다.")
+        return
+
+    # 각 신호 파일(드론 모델)마다 순회
+    for drone_model_path in signal_list:
+        drone_filename = os.path.basename(drone_model_path)
+        drone_base_name = os.path.splitext(drone_filename)[0]
+        
+        # 파일명에서 클래스 ID 결정 (기존 로직)
+        numbers = re.findall(r'\d+', drone_filename)
+        class_id = int(numbers[-1]) - 1 if numbers else 0
+        class_id = max(0, class_id)
+        
+        print(f"🚀 합성 시작: {drone_filename} -> 클래스 ID: {class_id}")
+        
+        # 드론 모델 이미지 로드
+        drone = cv2.imread(drone_model_path, cv2.IMREAD_UNCHANGED)
+        if drone is None: continue
+        
+        # 알파 채널 보정 (기존 로직 유지)
+        if len(drone.shape) == 2:
+            drone = cv2.cvtColor(drone, cv2.COLOR_GRAY2BGRA)
+            drone[:, :, 3] = 255
+        elif drone.shape[2] == 3:
+            b, g, r = cv2.split(drone)
+            alpha = np.ones(b.shape, dtype=b.dtype) * 255
+            drone = cv2.merge((b, g, r, alpha))
+        
+        # 각 드론 모델마다 num_images 횟수만큼 합성 반복
+        for i in tqdm(range(num_images)):
+            bg_path = random.choice(backgrounds)
+            background = cv2.imread(bg_path)
+            if background is None: continue
+            
+            bg_h, bg_w = background.shape[:2]
+            drone_orig_h, drone_orig_w = drone.shape[:2]
+            
+            # 드론 크기 조정 (기존 로직 유지)
+            scale = 1.0
+            if drone_orig_w > bg_w or drone_orig_h > bg_h:
+                scale = min(bg_w / drone_orig_w, bg_h / drone_orig_h)
+            
+            drone_resized = cv2.resize(drone, (0, 0), fx=scale, fy=scale)
+            drone_h, drone_w = drone_resized.shape[:2]
+            
+            # 드론 위치 랜덤 선택
+            max_x, max_y = max(1, bg_w - drone_w), max(1, bg_h - drone_h)
+            x_pos = random.randint(0, max_x)
+            y_pos = random.randint(0, max_y)
+            
+            # 알파 블렌딩 합성 (기존 로직 유지)
+            roi = background[y_pos:y_pos+drone_h, x_pos:x_pos+drone_w]
+            if drone_resized.shape[2] == 4:
+                alpha_mask = drone_resized[:, :, 3] / 255.0
+                alpha_mask_3d = np.stack([alpha_mask] * 3, axis=2)
+                foreground = drone_resized[:, :, :3]
+                blended_img = foreground * alpha_mask_3d + roi * (1 - alpha_mask_3d)
+                background[y_pos:y_pos+drone_h, x_pos:x_pos+drone_w] = blended_img
+            else:
+                background[y_pos:y_pos+drone_h, x_pos:x_pos+drone_w] = drone_resized[:, :, :3]
+            
+            # YOLO 라벨 계산 (기존 로직 유지)
+            drone_center_x = (x_pos + drone_w/2) / bg_w
+            drone_center_y = (y_pos + drone_h/2) / bg_h
+            drone_width = drone_w / bg_w
+            drone_height = drone_h / bg_h
+            
+            # 저장 처리
+            save_base_name = f"{drone_base_name}_{i:04d}"
+            
+            # 1) 이미지 저장
+            img_save_path = os.path.join(img_output_dir, f"{save_base_name}.png")
+            cv2.imwrite(img_save_path, background)
+            
+            # 2) 라벨 저장
+            label_save_path = os.path.join(label_output_dir, f"{save_base_name}.txt")
+            with open(label_save_path, 'w') as f:
+                f.write(f"{class_id} {drone_center_x:.6f} {drone_center_y:.6f} {drone_width:.6f} {drone_height:.6f}\n")
+    
+    print(f"✅ 모든 모델 처리 완료! 결과 저장: {output_dir}")
+
 def batch_slice_yolo_polygon(input_img_dir, input_label_dir, output_dir, tile_size=1024, overlap=0.1):
     out_img_path = os.path.join(output_dir, 'images')
     out_label_path = os.path.join(output_dir, 'labels')
@@ -1842,6 +1944,8 @@ def resize_data_label_box(img_dir, label_dir, out_img_dir, out_label_dir, target
     
     img_list = [f for f in os.listdir(img_dir) if f.lower().endswith(('.png', '.jpg'))]
 
+    print(f"🚀 리사이징 시작: {img_dir} -> {out_img_dir}")
+
     for filename in tqdm(img_list):
         img = cv2.imread(os.path.join(img_dir, filename))
         if img is None: continue
@@ -1919,6 +2023,8 @@ def resize_data_label_polygon(img_dir, label_dir, out_img_dir, out_label_dir, ta
     os.makedirs(out_label_dir, exist_ok=True)
     
     img_list = [f for f in os.listdir(img_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+
+    print(f"🚀 리사이징 시작: {img_dir} -> {out_img_dir}")
 
     for filename in tqdm(img_list):
         # 1. 이미지 로드
@@ -2176,6 +2282,7 @@ final_output_dir = './datasets' # 최종 분할 데이터셋 저장될 경로
 ##############################################
 # # python prepare_data.py synthetic --drone ./datasets/drone_data/signal/autelevo_01_sig_2.png --back ./datasets/drone_data/background --output ./datasets/synthetic --num 100
 # create_synthetic_drone_images(drone_path, background_dir, synthetic_output_dir, num_images=50)
+create_synthetic_drone_images_folder(drone_dir, background_dir, synthetic_output_dir, num_images=100)
 
 ##############################################
 # 1. 드론 이미지 합성 (스케일럿(폴리곤) 마스크 적용) 
@@ -2184,7 +2291,7 @@ final_output_dir = './datasets' # 최종 분할 데이터셋 저장될 경로
 # # python prepare_data.py synthetic_skeletal --drone ./datasets/drone_data/signal/signal_4.png --back_dir ./datasets/drone_data/background --output_dir ./datasets/synthetic --num 5 --mask_type line
 # synthesize_advanced(drone_path, background_dir, synthetic_output_dir, num_gen=50, mask_type='polygon') # mask_type='line') # 신호 패턴이 단순 사각형 모양일 경우 적용
 # synthesize_advanced(drone_path, background_dir, synthetic_output_dir, num_gen=50) # (모든 점을 감싸는 가장 타이트한 볼록 다각형 생성)
-synthesize_advanced_folder(drone_dir, background_dir, synthetic_output_dir, num_gen=100)
+# synthesize_advanced_folder(drone_dir, background_dir, synthetic_output_dir, num_gen=100)
 
 ####################################################################################
 # 1. 드론 이미지 합성 (산모양 스케일럿(폴리곤) 마스크 적용) - 신호 패턴이 쌍봉 모양일 경우 적용
@@ -2195,7 +2302,7 @@ synthesize_advanced_folder(drone_dir, background_dir, synthetic_output_dir, num_
 ##############################################
 # 2. resize image and label Box
 ##############################################
-# resize_data_label_box(img_dir, label_dir, resize_img_dir, resize_label_dir, target_w=1280, target_h=437)
+resize_data_label_box(img_dir, label_dir, resize_img_dir, resize_label_dir, target_w=1280, target_h=437)
 
 # resize_img_path = './datasets/synthetic/resized/images/mini2_mini3_sig_1_0034.png'
 # resize_label_path = './datasets/synthetic/resized/labels/mini2_mini3_sig_1_0034.txt'
@@ -2205,7 +2312,7 @@ synthesize_advanced_folder(drone_dir, background_dir, synthetic_output_dir, num_
 ##############################################
 # 2. resize image and label Polygon
 ##############################################
-resize_data_label_polygon(img_dir, label_dir, resize_img_dir, resize_label_dir, target_w=1280, target_h=437)
+# resize_data_label_polygon(img_dir, label_dir, resize_img_dir, resize_label_dir, target_w=1280, target_h=437)
 
 # resize_img_path = './datasets/synthetic/resized/images/mini2_mini3_sig5_1_0019.png'
 # resize_label_path = './datasets/synthetic/resized/labels/mini2_mini3_sig5_1_0019.txt'
@@ -2216,10 +2323,10 @@ resize_data_label_polygon(img_dir, label_dir, resize_img_dir, resize_label_dir, 
 # 2. 합성 이미지 슬라이싱
 ##############################################
 # python prepare_data.py slice_image --img_dir ./datasets/drone_data/signal --label_dir ./datasets/drone_data/background --output_dir ./datasets/synthetic --size 2560 --overlap 0.3
-# batch_slice_yolo_box_complete_only(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.4) # 모든 객체가 타일안에 있는 경우만 저장(box)
+batch_slice_yolo_box_complete_only(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.4) # 모든 객체가 타일안에 있는 경우만 저장(box)
 # batch_slice_yolo_polygon(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.4) # Box와 polygon 별도로 분리
 # batch_slice_yolo_polygon_integrated(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.4) # 모든 형식 polygon으로 통일(잘리는영역 crop)
-batch_slice_yolo_polygon_complete_only(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.4) # 모든 객체가 타일안에 있는 경우만 저장(polygon)
+# batch_slice_yolo_polygon_complete_only(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.4) # 모든 객체가 타일안에 있는 경우만 저장(polygon)
 
 ##############################################
 # 3. 원본 이미지 분할 (train, val, test)  
