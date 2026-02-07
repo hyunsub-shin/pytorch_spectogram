@@ -2278,23 +2278,23 @@ sliced_label_dir = './datasets/synthetic/sliced_data/labels'
 final_output_dir = './datasets' # 최종 분할 데이터셋 저장될 경로
 
 ##############################################
-# 1. 드론 이미지 합성 (박스 마스크 적용)
+# 1. 드론 이미지 합성 (박스 마스크 적용) - detection
 ##############################################
 # # python prepare_data.py synthetic --drone ./datasets/drone_data/signal/autelevo_01_sig_2.png --back ./datasets/drone_data/background --output ./datasets/synthetic --num 100
 # create_synthetic_drone_images(drone_path, background_dir, synthetic_output_dir, num_images=50)
-create_synthetic_drone_images_folder(drone_dir, background_dir, synthetic_output_dir, num_images=100)
+create_synthetic_drone_images_folder(drone_dir, background_dir, synthetic_output_dir, num_images=100) # 폴더 내 모든 이미지에 대해 합성
 
 ##############################################
-# 1. 드론 이미지 합성 (스케일럿(폴리곤) 마스크 적용) 
+# 1. 드론 이미지 합성 (스케일럿(폴리곤) 마스크 적용) - segmentation
 # - 기존 advanced_mountain_shape을 advanced로 변경 (모든 점을 감싸는 가장 타이트한 볼록 다각형 생성)
 ##############################################
 # # python prepare_data.py synthetic_skeletal --drone ./datasets/drone_data/signal/signal_4.png --back_dir ./datasets/drone_data/background --output_dir ./datasets/synthetic --num 5 --mask_type line
 # synthesize_advanced(drone_path, background_dir, synthetic_output_dir, num_gen=50, mask_type='polygon') # mask_type='line') # 신호 패턴이 단순 사각형 모양일 경우 적용
 # synthesize_advanced(drone_path, background_dir, synthetic_output_dir, num_gen=50) # (모든 점을 감싸는 가장 타이트한 볼록 다각형 생성)
-# synthesize_advanced_folder(drone_dir, background_dir, synthetic_output_dir, num_gen=100)
+# synthesize_advanced_folder(drone_dir, background_dir, synthetic_output_dir, num_gen=100) # 폴더 내 모든 이미지에 대해 합성
 
 ####################################################################################
-# 1. 드론 이미지 합성 (산모양 스케일럿(폴리곤) 마스크 적용) - 신호 패턴이 쌍봉 모양일 경우 적용
+# 1. 드론 이미지 합성 (산모양 스케일럿(폴리곤) 마스크 적용) - 신호 패턴이 쌍봉 모양일 경우 적용 - segmentation
 ####################################################################################
 # # python prepare_data.py synthetic_mountain --drone ./datasets/drone_data/signal/signal_4.png --back_dir ./datasets/drone_data/background --output_dir ./datasets/synthetic --num 5 --mask_type line
 # synthesize_advanced_mountain_shape(drone_path, background_dir, synthetic_output_dir, num_gen=50) #, mask_type='polygon')
@@ -2302,25 +2302,27 @@ create_synthetic_drone_images_folder(drone_dir, background_dir, synthetic_output
 ##############################################
 # 2. resize image and label Box
 ##############################################
-resize_data_label_box(img_dir, label_dir, resize_img_dir, resize_label_dir, target_w=1280, target_h=437)
+resize_data_label_box(img_dir, label_dir, resize_img_dir, resize_label_dir, target_w=2560, target_h=874)
 
+# # verify resize box
 # resize_img_path = './datasets/synthetic/resized/images/mini2_mini3_sig_1_0034.png'
 # resize_label_path = './datasets/synthetic/resized/labels/mini2_mini3_sig_1_0034.txt'
 # save_path = './datasets/synthetic/resized'
-# verify_resize_box_fix(resize_img_path, resize_label_path, save_path, target_w=1280, target_h=437)
+# verify_resize_box_fix(resize_img_path, resize_label_path, save_path, target_w=2560, target_h=874)
 
 ##############################################
 # 2. resize image and label Polygon
 ##############################################
-# resize_data_label_polygon(img_dir, label_dir, resize_img_dir, resize_label_dir, target_w=1280, target_h=437)
+# resize_data_label_polygon(img_dir, label_dir, resize_img_dir, resize_label_dir, target_w=2560, target_h=874)
 
+# # verify resize polygon
 # resize_img_path = './datasets/synthetic/resized/images/mini2_mini3_sig5_1_0019.png'
 # resize_label_path = './datasets/synthetic/resized/labels/mini2_mini3_sig5_1_0019.txt'
 # save_path = './datasets/synthetic/resized'
-# verify_resized_polygon(resize_img_path, resize_label_path, save_path, target_w=1280, target_h=437)
+# verify_resized_polygon(resize_img_path, resize_label_path, save_path, target_w=2560, target_h=874)
 
 ##############################################
-# 2. 합성 이미지 슬라이싱
+# 3. 합성 이미지 슬라이싱
 ##############################################
 # python prepare_data.py slice_image --img_dir ./datasets/drone_data/signal --label_dir ./datasets/drone_data/background --output_dir ./datasets/synthetic --size 2560 --overlap 0.3
 batch_slice_yolo_box_complete_only(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.4) # 모든 객체가 타일안에 있는 경우만 저장(box)
@@ -2329,24 +2331,24 @@ batch_slice_yolo_box_complete_only(img_dir, label_dir, sliced_out_dir, tile_size
 # batch_slice_yolo_polygon_complete_only(img_dir, label_dir, sliced_out_dir, tile_size=2560, overlap=0.4) # 모든 객체가 타일안에 있는 경우만 저장(polygon)
 
 ##############################################
-# 3. 원본 이미지 분할 (train, val, test)  
+# 4. 원본 이미지 분할 (train, val, test)  
 # ############################################## 
 # # python prepare_data.py split --images ./datasets/synthetic --labels ./datasets/synthetic --output ./datasets --train 0.7 --val 0.2 --test 0.1
 split_dataset(resize_img_dir, resize_label_dir, None, final_output_dir, train_ratio=0.8, val_ratio=0.2, test_ratio=0.0)
 
 ##############################################
-# 3. 슬라이싱 이미지 묶음 분할 (train, val, test)
+# 4. 슬라이싱 이미지 묶음 분할 (train, val, test)
 ##############################################
 # # python prepare_data.py split_sliced --images ./datasets/synthetic/images --labels ./datasets/synthetic/labels --output ./datasets --train 0.7 --val 0.2 --test 0.1
 split_sliced_dataset(sliced_img_dir, sliced_label_dir, final_output_dir, train_ratio=0.8, val_ratio=0.2, test_ratio=0.0)
 
 ##############################################
-# 4. Polygon 슬라이스된 이미지+라벨 view
+# 5. Polygon 슬라이스된 이미지+라벨 view
 ##############################################
 # out_path = './datasets/synthetic/sliced_data/tile_view.png'
 # create_tile_gallery(sliced_img_dir, sliced_label_dir, out_path, grid_size=(4, 4), thumb_size=(400, 400))
 
 ##############################################
-# 4. Box 슬라이스된 이미지+라벨 view
+# 5. Box 슬라이스된 이미지+라벨 view
 ##############################################
 # preview_dataset(sliced_img_dir, sliced_label_dir)
