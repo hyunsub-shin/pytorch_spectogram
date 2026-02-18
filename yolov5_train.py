@@ -30,25 +30,30 @@ def main():
     model.train(
         data=data_yaml,
         epochs=epochs,
-        imgsz=img_size,  # 이미지 크기
-        batch=batch,     # 배치 크기
-        name='final',    # 결과 폴더 이름
+        imgsz=img_size,     # 이미지 크기
+        batch=batch,        # 배치 크기
+        name='final',       # 결과 폴더 이름
         device=device,
         patience=patience,
-        # lr0 = lr0,      # 추가 학습시 적용
-        # freeze=10,       # 0~10번 레이어(Backbone 일부)를 고정
+
+        lr0 = lr0,           # 추가 학습시 적용
+        freeze=freeze,       # 0~10번 레이어(Backbone 일부)를 고정
         # overlap_mask=True, # 세그멘테이션 성능 향상
 
-        augment=True,    # 데이터 증강 활성화
+        augment=False,      # 데이터 증강 활성/비활성화
         # ------ 세부 증강 설정 ------
-        mosaic=0.0,      # 작은 객체 학습 강화 미적용(default: 1.0) <<== 해볼것(현재 1.0으로 학습)
-        close_mosaic=10, # 마지막 10 에포크에서는 Mosaic을 끄고 학습
-        scale=0.0, # 이미지 크기 변경 안함(default: 0.5)
-        flipud=0.0, # 상하 뒤집기 미적용(default: 0.0)
-        fliplr=0.0, # 좌우 뒤집기 미적용(default: 0.5)
-        erasing=0.0, # 지우개 증강 미적용(default: 0.4)
+        mosaic=0.0,         # 작은 객체 학습 강화 미적용(default: 1.0)
+        close_mosaic=15,    # 마지막 15 에포크에서는 Mosaic을 끄고 학습
+        scale=0.0,          # 이미지 크기 변경 안함(default: 0.5)
+        flipud=0.0,         # 상하 뒤집기 미적용(default: 0.0)
+        fliplr=0.0,         # 좌우 뒤집기 미적용(default: 0.5)
+        erasing=0.0,        # 지우개 증강 미적용(default: 0.4)
+        hsv_h=0.015,        # 색상(hue) 조정
+        hsv_s=0.7,          # 채도(satuation) 조정
+        hsv_v=0.4,          # 명도(value) 조정, 대비차 학습
         # --------------------------
-        verbose=True     # 진행률 표시
+
+        verbose=True        # 진행률 표시
     )
 
     print("Training completed.!!!!")
@@ -57,8 +62,8 @@ def main():
 if __name__ == "__main__":
     img_size = 2560 #(1280) #첫데이터셋(206, 889) #(h, w)
     batch = 2
-    epochs = 80
-    patience = 15
+    epochs = 20
+    patience = 7
 
     # # Segmentation
     # weights = 'yolo11n-seg.pt' # polygon label(segmentation)
@@ -69,11 +74,15 @@ if __name__ == "__main__":
     # weights = 'best-det_resize_base.pt'
 
     # # yolov8/v11 P2 Layer
-    weights = 'yolov8s-p2.yaml' # P2 레이어를 추가 1/4 해상도 단계에서 탐지를 수행
+    # weights = 'yolov8s-p2.yaml' # P2 레이어를 추가 1/4 해상도 단계에서 탐지를 수행 ==>> 1차 augment:True로 학습
     # weights = 'yolov11n-p2_custom.yaml' # v11n P2 레이어를 추가 1/4 해상도 단계에서 탐지를 수행
 
+    # # 전이학습
+    weights = 'best-det_p2_v11n_custom_resize2560_2nd_aug_true.pt' # ==>> 2차 augment:False로 학습 ==> 3차 시그널 추가 학습(true)
+
     data_yaml = 'drone_dataset.yaml'
-    # lr0 = 0.001 # 추가 학습시 적용
+    lr0 = 0.0001    # 추가 학습시 적용
+    freeze = 10     # 추가 학습시 필요시 적용
 
     main()
     
